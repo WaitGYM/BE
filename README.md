@@ -1,25 +1,27 @@
-# Gym Reservation Backend (Express + Prisma + PostgreSQL)
+# 🏋️ Gym Reservation Backend (Express + Prisma + PostgreSQL)
 
 ## 1) 준비물
 - Node.js 18+
+- PostgreSQL (Supabase 또는 로컬 DB)
 - Docker (선택: Postgres를 Docker로 띄우려면)
 
 ## 2) 실행
 ```bash
-# DB (Docker 사용 시)
+# 1. DB (Docker 사용 시)
 docker compose up -d
 
-# 패키지 설치
-npm i
+# 2. 패키지 설치
+npm install
 
-# Prisma 마이그레이션
-npm run migrate
+# 3. Prisma 마이그레이션 적용
+npm run migrate   # (= npx prisma migrate deploy)
 
-# Seed (관리자 계정/예시 데이터 추가)
+# 4. Seed (관리자 계정/예시 데이터 추가)
 npm run seed
 
-# 서버 실행
+# 5. 서버 실행
 npm run dev
+
 ```
 
 - 서버: http://localhost:4000
@@ -30,21 +32,25 @@ npm run dev
 - password: `admin1234`
 
 ## 3) 주요 API
-- Auth
-  - POST `/api/auth/register` { email, password, name }
-  - POST `/api/auth/login` { email, password } → { token }
-- Equipment
-  - GET `/api/equipment`
-  - POST `/api/equipment` (ADMIN) { name, location? }
-  - PUT `/api/equipment/:id` (ADMIN)
-  - DELETE `/api/equipment/:id` (ADMIN)
-- Reservations
-  - POST `/api/reservations` (USER) { equipmentId, startAt, endAt }
-  - GET  `/api/reservations/me` (USER)
-  - GET  `/api/reservations/:id` (USER/ADMIN owner-only)
-  - PUT  `/api/reservations/:id` (USER/ADMIN owner-only)
-  - DELETE `/api/reservations/:id` (USER/ADMIN owner-only)
-  - GET `/api/reservations/availability?equipmentId=1&date=YYYY-MM-DD&slotMinutes=30`
+🔑 Auth
+
+- POST /api/auth/register → { email, password, name }
+- POST /api/auth/login → { email, password } → { token }
+
+🏋️ Equipment
+
+- GET /api/equipment
+- POST /api/equipment (ADMIN) → { name, location? }
+- PUT /api/equipment/:id (ADMIN)
+- DELETE /api/equipment/:id (ADMIN)
+
+📅 Reservations
+- POST /api/reservations (USER) → { equipmentId, startAt, endAt }
+- GET /api/reservations/me (USER)
+- GET /api/reservations/:id (USER 본인 / ADMIN)
+- PUT /api/reservations/:id (USER 본인 / ADMIN)
+- DELETE /api/reservations/:id (USER 본인 / ADMIN)
+- GET /api/reservations/availability?equipmentId=1&date=YYYY-MM-DD&slotMinutes=30
 
 ## 4) 권한
 - Bearer 토큰 필요: 대부분의 예약/개인 데이터 관련 API
