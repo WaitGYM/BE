@@ -1,0 +1,41 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooled (pgbouncer) 연결
+  directUrl = env("DIRECT_URL")   // 직결(마이그레이션용)
+}
+
+model User {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  password  String
+  name      String
+  role      String    @default("USER")
+  createdAt DateTime  @default(now())
+  reservations Reservation[]
+}
+
+model Equipment {
+  id        Int       @id @default(autoincrement())
+  name      String
+  location  String?
+  createdAt DateTime  @default(now())
+  reservations Reservation[]
+}
+
+model Reservation {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  equipmentId Int
+  startAt     DateTime
+  endAt       DateTime
+  status      String    @default("BOOKED")
+
+  user        User      @relation(fields: [userId], references: [id])
+  equipment   Equipment @relation(fields: [equipmentId], references: [id])
+
+  @@index([equipmentId, startAt, endAt])
+}
