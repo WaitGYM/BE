@@ -9,12 +9,16 @@ datasource db {
 }
 
 model User {
-  id        Int       @id @default(autoincrement())
-  email     String    @unique
-  password  String
-  name      String
-  role      String    @default("USER")
-  createdAt DateTime  @default(now())
+  id          Int       @id @default(autoincrement())
+  email       String    @unique
+  name        String
+  role        String    @default("USER")
+  
+  // OAuth 전용 필드
+  googleId    String    @unique  // Google에서 받은 사용자 ID
+  avatar      String?   // 프로필 이미지 URL
+  
+  createdAt   DateTime  @default(now())
   reservations Reservation[]
 }
 

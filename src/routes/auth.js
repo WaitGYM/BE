@@ -1,45 +1,112 @@
 const router = require('express').Router()
 const { PrismaClient } = require('@prisma/client')
 const prisma = new PrismaClient()
-const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
-const { z } = require('zod')
+const passport = require('passport')
 
-const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6),
-  name: z.string().min(1)
+// 구글 OAuth 로그인 시작
+router.get('/google', 
+  passport.authenticate('google', { 
+    scope: ['profile', 'email'] 
+  })
+)
+
+// 구글 OAuth 콜백
+router.get('/google/callback',
+  passport.authenticate('google', { 
+    failureRedirect: `${process.env.FRONTEND_URL}/login?error=auth_failed` 
+  }),
+  (req, res) => {
+    try {
+      // JWT 토큰 생성
+      const token = jwt.sign(
+        { 
+          id: req.user.id, 
+          email: req.user.email, 
+          role: req.user.role 
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      )
+      
+      // 사용자 정보
+      const user = {
+        id: req.user.id,
+        email: req.user.email,
+        name: req.user.name,
+        avatar: req.user.avatar,
+        role: req.user.role
+      }
+      
+      // 프론트엔드로 리다이렉트 (토큰을 쿼리로 전달)
+      const redirectUrl = `${process.env.FRONTEND_URL}/auth/success?token=${token}&user=${encodeURIComponent(JSON.stringify(user))}`
+      res.redirect(redirectUrl)
+      
+    } catch (error) {
+      console.error('Token generation error:', error)
+      res.redirect(`${process.env.FRONTEND_URL}/login?error=token_failed`)
+    }
+  }
+)
+
+// 로그아웃
+router.post('/logout', (req, res) => {
+  req.logout((err) => {
+    if (err) {
+      return res.status(500).json({ error: '로그아웃 실패' })
+    }
+    req.session.destroy((err) => {
+      if (err) {
+        return res.status(500).json({ error: '세션 삭제 실패' })
+      }
+      res.json({ message: '로그아웃 성공' })
+    })
+  })
 })
-router.post('/register', async (req, res) => {
-  const parse = registerSchema.safeParse(req.body)
-  if (!parse.success) return res.status(400).json({ error: '입력 형식 오류' })
 
-  const { email, password, name } = parse.data
-  const exists = await prisma.user.findUnique({ where: { email } })
-  if (exists) return res.status(409).json({ error: '이미 존재하는 이메일' })
+// 현재 사용자 정보 조회 (JWT 토큰 기반)
+router.get('/me', async (req, res) => {
+  try {
+    const header = req.headers.authorization || ''
+    const token = header.startsWith('Bearer ') ? header.slice(7) : null
+    
+    if (!token) {
+      return res.status(401).json({ error: '토큰이 필요합니다' })
+    }
 
-  const hash = await bcrypt.hash(password, 10)
-  const user = await prisma.user.create({ data: { email, password: hash, name } })
-  res.status(201).json({ id: user.id, email: user.email, name: user.name })
-})
+    const payload = jwt.verify(token, process.env.JWT_SECRET)
+    const user = await prisma.user.findUnique({
+      where: { id: payload.id },
+      select: { 
+        id: true, 
+        email: true, 
+        name: true, 
+        role: true, 
+        avatar: true,
+        createdAt: true
+      }
+    })
 
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6)
-})
-router.post('/login', async (req, res) => {
-  const parse = loginSchema.safeParse(req.body)
-  if (!parse.success) return res.status(400).json({ error: '입력 형식 오류' })
+    if (!user) {
+      return res.status(404).json({ error: '사용자를 찾을 수 없습니다' })
+    }
 
-  const { email, password } = parse.data
-  const user = await prisma.user.findUnique({ where: { email } })
-  if (!user) return res.status(401).json({ error: '이메일/비번 확인' })
-
-  const ok = await bcrypt.compare(password, user.password)
-  if (!ok) return res.status(401).json({ error: '이메일/비번 확인' })
-
-  const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: '7d' })
-  res.json({ token })
+    res.json(user)
+  } catch (error) {
+    return res.status(401).json({ error: '유효하지 않은 토큰' })
+  }
 })
 
 module.exports = router
+
+// src/routes/auth.js에 추가 (개발환경에서만 사용)
+if (process.env.NODE_ENV === 'development') {
+  router.post('/make-admin/:userId', async (req, res) => {
+    const userId = Number(req.params.userId)
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { role: 'ADMIN' }
+    })
+    res.json({ message: '관리자 권한이 부여되었습니다', user })
+  })
+}
