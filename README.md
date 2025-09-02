@@ -34,28 +34,28 @@ npm run dev
 ## 3) 주요 API
 🔑 Auth
 
-# Google OAuth 로그인 시작
+Google OAuth 로그인 시작
 GET /api/auth/google
 
-# Google OAuth 콜백 (자동 처리)
+Google OAuth 콜백 (자동 처리)
 GET /api/auth/google/callback
 
-# 현재 사용자 정보 조회
+현재 사용자 정보 조회
 GET /api/auth/me
 Authorization: Bearer {token}
 
-# 로그아웃
+로그아웃
 POST /api/auth/logout
 
-# 관리자 권한 부여 (개발환경 전용)
+관리자 권한 부여 (개발환경 전용)
 POST /api/auth/make-admin/:userId
 
 🏋️ Equipment
 
-# 장비 목록 조회 (공개)
+장비 목록 조회 (공개)
 GET /api/equipment
 
-# 장비 생성 (관리자만)
+장비 생성 (관리자만)
 POST /api/equipment
 Authorization: Bearer {token}
 Content-Type: application/json
@@ -64,16 +64,16 @@ Content-Type: application/json
   "location": "A-1"
 }
 
-# 장비 수정 (관리자만)
+장비 수정 (관리자만)
 PUT /api/equipment/:id
 Authorization: Bearer {token}
 
-# 장비 삭제 (관리자만)
+장비 삭제 (관리자만)
 DELETE /api/equipment/:id
 Authorization: Bearer {token}
 
 📅 Reservations
-# 예약 생성
+예약 생성
 POST /api/reservations
 Authorization: Bearer {token}
 Content-Type: application/json
@@ -83,23 +83,23 @@ Content-Type: application/json
   "endAt": "2025-09-03T11:00:00.000Z"
 }
 
-# 내 예약 목록
+내 예약 목록
 GET /api/reservations/me
 Authorization: Bearer {token}
 
-# 예약 상세 조회 (본인 또는 관리자)
+예약 상세 조회 (본인 또는 관리자)
 GET /api/reservations/:id
 Authorization: Bearer {token}
 
-# 예약 수정 (본인 또는 관리자)
+예약 수정 (본인 또는 관리자)
 PUT /api/reservations/:id
 Authorization: Bearer {token}
 
-# 예약 삭제 (본인 또는 관리자)
+예약 삭제 (본인 또는 관리자)
 DELETE /api/reservations/:id
 Authorization: Bearer {token}
 
-# 예약 가능 시간 조회
+예약 가능 시간 조회
 GET /api/reservations/availability?equipmentId=1&date=2025-09-03&open=09:00&close=18:00&slotMinutes=30
 
 ## 4) 권한
