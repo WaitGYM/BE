@@ -128,5 +128,34 @@ router.get('/availability', async (req, res) => {
   }
   res.json({ equipmentId, date, slotMinutes, slots })
 })
+// 오늘의 내 예약
+router.get('/today', auth(), async (req, res) => {
+  try {
+    const today = new Date()
+    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+    const endOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
+    
+    const todayReservations = await prisma.reservation.findMany({
+      where: {
+        userId: req.user.id,
+        startAt: {
+          gte: startOfToday,
+          lt: endOfToday
+        }
+      },
+      orderBy: { startAt: 'asc' },
+      include: {
+        equipment: {
+          select: { id: true, name: true, location: true }
+        }
+      }
+    })
+    
+    res.json(todayReservations)
+  } catch (error) {
+    console.error('Today reservations error:', error)
+    res.status(500).json({ error: '오늘 예약 조회 실패' })
+  }
+})
 
 module.exports = router
