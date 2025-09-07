@@ -22,6 +22,7 @@ async function hasOverlap(equipmentId, startAt, endAt, excludeId) {
 }
 
 // 생성
+// 예약 생성 부분 수정 (기존 POST '/' 라우트 교체)
 router.post('/', auth(), async (req, res) => {
   const parse = resvSchema.safeParse({
     ...req.body,
@@ -33,10 +34,30 @@ router.post('/', auth(), async (req, res) => {
   const s = new Date(startAt); const e = new Date(endAt)
   if (await hasOverlap(equipmentId, s, e)) return res.status(409).json({ error: '시간 중복' })
 
-  const created = await prisma.reservation.create({
-    data: { equipmentId, userId: req.user.id, startAt: s, endAt: e }
-  })
-  res.status(201).json(created)
+  try {
+    // 예약 생성
+    const created = await prisma.reservation.create({
+      data: { equipmentId, userId: req.user.id, startAt: s, endAt: e },
+      include: {
+        equipment: true,
+        user: {
+          select: { id: true, name: true, email: true }
+        }
+      }
+    })
+
+    // 실시간 알림 전송
+    req.notificationService.notifyNewReservation(
+      created,
+      created.equipment,
+      created.user
+    )
+
+    res.status(201).json(created)
+  } catch (error) {
+    console.error('Reservation creation error:', error)
+    res.status(500).json({ error: '예약 생성 실패' })
+  }
 })
 
 // 내 예약 목록
@@ -83,15 +104,80 @@ router.put('/:id', auth(), async (req, res) => {
 })
 
 // 삭제
+// 예약 삭제 부분 수정 (기존 DELETE '/:id' 라우트 교체)
 router.delete('/:id', auth(), async (req, res) => {
   const id = Number(req.params.id)
-  const prev = await prisma.reservation.findUnique({ where: { id } })
-  if (!prev) return res.status(404).json({ error: '없음' })
-  if (prev.userId !== req.user.id && req.user.role !== 'ADMIN') return res.status(403).json({ error: '권한 없음' })
-  await prisma.reservation.delete({ where: { id } })
-  res.status(204).end()
+  
+  try {
+    // 삭제 전에 예약 정보 조회 (알림용)
+    const prev = await prisma.reservation.findUnique({ 
+      where: { id },
+      include: {
+        equipment: true,
+        user: {
+          select: { id: true, name: true, email: true }
+        }
+      }
+    })
+    
+    if (!prev) return res.status(404).json({ error: '없음' })
+    if (prev.userId !== req.user.id && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: '권한 없음' })
+    }
+
+    // 예약 삭제
+    await prisma.reservation.delete({ where: { id } })
+
+    // 실시간 알림 전송
+    req.notificationService.notifyReservationCancelled(
+      prev,
+      prev.equipment,
+      prev.user
+    )
+
+    res.status(204).end()
+  } catch (error) {
+    console.error('Reservation deletion error:', error)
+    res.status(500).json({ error: '예약 삭제 실패' })
+  }
 })
 
+// 실시간 장비 현황 조회 (새로 추가)
+router.get('/live/:equipmentId', async (req, res) => {
+  try {
+    const equipmentId = Number(req.params.equipmentId)
+    const today = new Date()
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+
+    const reservations = await prisma.reservation.findMany({
+      where: {
+        equipmentId,
+        startAt: {
+          gte: today,
+          lt: tomorrow
+        }
+      },
+      orderBy: { startAt: 'asc' },
+      select: {
+        id: true,
+        startAt: true,
+        endAt: true,
+        status: true
+      }
+    })
+
+    res.json({
+      equipmentId,
+      date: today.toISOString().split('T')[0],
+      reservations,
+      lastUpdate: new Date().toISOString()
+    })
+  } catch (error) {
+    console.error('Live equipment status error:', error)
+    res.status(500).json({ error: '실시간 현황 조회 실패' })
+  }
+})
 /**
  * 예약 가능 시간 확인
  * GET /api/reservations/availability?equipmentId=1&date=2025-08-29&open=06:00&close=23:00&slotMinutes=30
