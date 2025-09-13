@@ -5,32 +5,42 @@ const { z } = require('zod')
 const prisma = new PrismaClient()
 
 // 목록 조회 (공개)
-router.get('/', async (_, res) => {
-  const list = await prisma.equipment.findMany({ orderBy: { id: 'desc' } })
+router.get('/', async (req, res) => {
+  const list = await prisma.equipment.findMany({ 
+    orderBy: { name: 'asc' },
+    include: {
+      _count: {
+        select: { reservations: true }
+      }
+    }
+  })
   res.json(list)
 })
 
-// 생성/수정/삭제는 관리자만
-const eqSchema = z.object({ name: z.string().min(1), location: z.string().optional() })
-router.post('/', auth('ADMIN'), async (req, res) => {
-  const parse = eqSchema.safeParse(req.body)
-  if (!parse.success) return res.status(400).json({ error: '입력 형식 오류' })
-  const created = await prisma.equipment.create({ data: parse.data })
-  res.status(201).json(created)
-})
-
-router.put('/:id', auth('ADMIN'), async (req, res) => {
+// 특정 기구 상세 조회
+router.get('/:id', async (req, res) => {
   const id = Number(req.params.id)
-  const parse = eqSchema.partial().safeParse(req.body)
-  if (!parse.success) return res.status(400).json({ error: '입력 형식 오류' })
-  const updated = await prisma.equipment.update({ where: { id }, data: parse.data })
-  res.json(updated)
-})
-
-router.delete('/:id', auth('ADMIN'), async (req, res) => {
-  const id = Number(req.params.id)
-  await prisma.equipment.delete({ where: { id } })
-  res.status(204).end()
+  const equipment = await prisma.equipment.findUnique({
+    where: { id },
+    include: {
+      reservations: {
+        where: {
+          startAt: { gte: new Date() }
+        },
+        orderBy: { startAt: 'asc' },
+        take: 10,
+        include: {
+          user: { select: { name: true } }
+        }
+      }
+    }
+  })
+  
+  if (!equipment) {
+    return res.status(404).json({ error: '기구를 찾을 수 없습니다' })
+  }
+  
+  res.json(equipment)
 })
 
 module.exports = router

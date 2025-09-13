@@ -4,33 +4,33 @@ const prisma = new PrismaClient({
 })
 
 async function main() {
-  // 관리자는 구글 로그인 후 수동으로 역할 변경
-  // 또는 특정 Google ID를 미리 관리자로 설정
-  const adminGoogleId = process.env.ADMIN_GOOGLE_ID // 환경변수로 관리자 Google ID 설정
-  
-  if (adminGoogleId) {
-    await prisma.user.upsert({
-      where: { googleId: adminGoogleId },
-      update: { role: 'ADMIN' },
-      create: {
-        email: 'admin@example.com', // 실제로는 구글 로그인 후 업데이트됨
-        name: 'Admin',
-        googleId: adminGoogleId,
-        role: 'ADMIN'
-      }
+  // 헬스장 기구들
+  const equipmentData = [
+    { name: '스미스 머신', imageUrl: null },
+    { name: '스텝밀', imageUrl: null },
+    { name: '케이블 와이 레이즈', imageUrl: null },
+    { name: '랫풀다운', imageUrl: null },
+    { name: '레그 프레스', imageUrl: null },
+    { name: '레그 컬', imageUrl: null },
+    { name: '어시스티드 머신 친업', imageUrl: null },
+    { name: '바벨 벤치 프레스', imageUrl: null },
+    { name: '백 익스텐션', imageUrl: null },
+    { name: '힙 어브덕션/어덕션', imageUrl: null },
+    { name: '트레드밀', imageUrl: null },
+    { name: '스쿼트 랙', imageUrl: null },
+  ]
+
+  for (const equipment of equipmentData) {
+    await prisma.equipment.upsert({
+      where: { 
+        name: equipment.name
+      },
+      update: {},
+      create: equipment
     })
   }
 
-  // 샘플 장비
-  await prisma.equipment.createMany({
-    data: [
-      { name: '스쿼트 랙', location: 'A-1' },
-      { name: '레그 프레스', location: 'A-2' },
-      { name: '바벨 벤치', location: 'B-1' }
-    ],
-    skipDuplicates: true
-  })
-
+  console.log(`${equipmentData.length}개의 기구가 등록되었습니다.`)
   console.log('Seed complete. Google OAuth로 로그인하세요.')
 }
 

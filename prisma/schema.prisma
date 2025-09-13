@@ -5,41 +5,42 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL") // pooled (pgbouncer) 연결
-  directUrl = env("DIRECT_URL")   // 직결(마이그레이션용)
+  directUrl = env("DIRECT_URL") // 직결(마이그레이션용)
 }
 
 model User {
-  id          Int       @id @default(autoincrement())
-  email       String    @unique
-  name        String
-  role        String    @default("USER")
-  
+  id    Int    @id @default(autoincrement())
+  email String @unique
+  name  String
+
   // OAuth 전용 필드
-  googleId    String    @unique  // Google에서 받은 사용자 ID
-  avatar      String?   // 프로필 이미지 URL
-  
-  createdAt   DateTime  @default(now())
+  googleId String  @unique // Google에서 받은 사용자 ID
+  avatar   String? // 프로필 이미지 URL
+
+  createdAt    DateTime      @default(now())
   reservations Reservation[]
 }
 
 model Equipment {
-  id        Int       @id @default(autoincrement())
-  name      String
-  location  String?
-  createdAt DateTime  @default(now())
+  id           Int           @id @default(autoincrement())
+  name         String        @unique
+  imageUrl     String? // Supabase Storage 이미지 URL
+  createdAt    DateTime      @default(now())
   reservations Reservation[]
 }
 
 model Reservation {
-  id          Int       @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   userId      Int
   equipmentId Int
   startAt     DateTime
   endAt       DateTime
-  status      String    @default("BOOKED")
+  sets        Int      @default(1) // 세트 수
+  restMinutes Int      @default(3) // 세트 간 휴식 시간 (분)
+  status      String   @default("BOOKED")
 
-  user        User      @relation(fields: [userId], references: [id])
-  equipment   Equipment @relation(fields: [equipmentId], references: [id])
+  user      User      @relation(fields: [userId], references: [id])
+  equipment Equipment @relation(fields: [equipmentId], references: [id])
 
   @@index([equipmentId, startAt, endAt])
 }

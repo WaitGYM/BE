@@ -32,8 +32,7 @@ passport.use(new GoogleStrategy({
         email: profile.emails[0].value,
         name: profile.displayName,
         googleId: profile.id,
-        avatar: profile.photos[0]?.value,
-        role: 'USER'
+        avatar: profile.photos[0]?.value
       }
     })
 
@@ -52,7 +51,7 @@ passport.deserializeUser(async (id, done) => {
   try {
     const user = await prisma.user.findUnique({ 
       where: { id },
-      select: { id: true, email: true, name: true, role: true, avatar: true }
+      select: { id: true, email: true, name: true, avatar: true }
     })
     done(null, user)
   } catch (error) {
