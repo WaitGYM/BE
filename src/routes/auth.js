@@ -4,7 +4,7 @@ const prisma = new PrismaClient();
 const jwt = require("jsonwebtoken");
 const passport = require("passport");
 
-// 구글 OAuth 로그인 시작 - 프론트에서 직접 fetch 불가능하므로 백에서 리디렉션 필요
+// 구글 OAuth 로그인 시작
 router.get("/google", (req, res) => {
   const redirectUrl =
     `https://accounts.google.com/o/oauth2/v2/auth?` +
@@ -28,7 +28,6 @@ router.get(
         {
           id: req.user.id,
           email: req.user.email,
-          role: req.user.role,
         },
         process.env.JWT_SECRET,
         { expiresIn: "7d" }
@@ -40,7 +39,6 @@ router.get(
         email: req.user.email,
         name: req.user.name,
         avatar: req.user.avatar,
-        role: req.user.role,
       };
 
       // 프론트엔드로 리다이렉트 (토큰을 쿼리로 전달)
@@ -89,7 +87,6 @@ router.get("/me", async (req, res) => {
         id: true,
         email: true,
         name: true,
-        role: true,
         avatar: true,
         createdAt: true,
       },
@@ -106,15 +103,3 @@ router.get("/me", async (req, res) => {
 });
 
 module.exports = router;
-
-// src/routes/auth.js에 추가 (개발환경에서만 사용)
-if (process.env.NODE_ENV === "development") {
-  router.post("/make-admin/:userId", async (req, res) => {
-    const userId = Number(req.params.userId);
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: { role: "ADMIN" },
-    });
-    res.json({ message: "관리자 권한이 부여되었습니다", user });
-  });
-}
