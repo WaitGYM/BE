@@ -4,8 +4,8 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL") // pooled (pgbouncer) 연결
-  directUrl = env("DIRECT_URL") // 직결(마이그레이션용)
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -14,19 +14,35 @@ model User {
   name  String
 
   // OAuth 전용 필드
-  googleId String  @unique // Google에서 받은 사용자 ID
-  avatar   String? // 프로필 이미지 URL
+  googleId String  @unique
+  avatar   String?
 
   createdAt    DateTime      @default(now())
   reservations Reservation[]
+  favorites    Favorite[]    // 즐겨찾기 관계 추가
 }
 
 model Equipment {
   id           Int           @id @default(autoincrement())
   name         String        @unique
-  imageUrl     String? // Supabase Storage 이미지 URL
+  imageUrl     String?
+  category     String        // 부위별 카테고리 (가슴, 등, 다리, 어깨, 팔, 유산소 등)
+  muscleGroup  String?       // 세부 근육 그룹 (선택사항)
   createdAt    DateTime      @default(now())
   reservations Reservation[]
+  favorites    Favorite[]    // 즐겨찾기 관계 추가
+}
+
+model Favorite {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  equipmentId Int
+  createdAt   DateTime  @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, equipmentId]) // 중복 즐겨찾기 방지
 }
 
 model Reservation {
@@ -35,8 +51,8 @@ model Reservation {
   equipmentId Int
   startAt     DateTime
   endAt       DateTime
-  sets        Int      @default(1) // 세트 수
-  restMinutes Int      @default(3) // 세트 간 휴식 시간 (분)
+  sets        Int      @default(1)
+  restMinutes Int      @default(3)
   status      String   @default("BOOKED")
 
   user      User      @relation(fields: [userId], references: [id])
