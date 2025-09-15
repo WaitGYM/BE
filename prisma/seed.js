@@ -9,7 +9,7 @@ async function main() {
     { 
       name: '스미스 머신 스쿼트', 
       imageUrl: null,
-      category: '하체',
+      category: '다리',
       muscleGroup: '대퇴사두근, 둔근, 햄스트링, 내전근'
     },
     { 
