@@ -7,10 +7,10 @@ async function main() {
   // 헬스장 기구들 (카테고리 정보 포함)
   const equipmentData = [
     { 
-      name: '스미스 머신', 
+      name: '스미스 머신 스쿼트', 
       imageUrl: null,
-      category: '가슴',
-      muscleGroup: '가슴, 어깨, 삼두'
+      category: '하체',
+      muscleGroup: '대퇴사두근, 둔근, 햄스트링, 내전근'
     },
     { 
       name: '스텝밀', 
@@ -57,7 +57,7 @@ async function main() {
       name: '힙 어브덕션/어덕션', 
       imageUrl: null,
       category: '다리',
-      muscleGroup: '둔근, 허벅지 안쪽'    },
+      muscleGroup: '둔근, 내전근'    },
     { 
       name: '트레드밀', 
       imageUrl: null,
