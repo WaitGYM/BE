@@ -4,17 +4,37 @@
 
 ## 📖 개요
 
-기존의 복잡한 시간 예약 시스템을 벗어나, **실제 헬스장 환경에 최적화된 대기열 시스템**입니다. 
-기구가 사용 중일 때 대기 순번을 미리 확보하고, 기구가 비면 실시간 알림을 받아 5분 내에 사용을 시작하는 자연스러운 플로우를 제공합니다.
+기존의 복잡한 **시간 예약 시스템**을 넘어선, 실제 헬스장 환경에 최적화된 **웨이팅(대기열) 시스템**입니다. 
+시간을 미리 정하지 않고, 현장에서 **"줄서기"** 방식으로 순서를 기다린 후, **세트별 운동 진행을 실시간 추적**하여 자동으로 다음 사람에게 넘어가는 자연스러운 플로우를 제공합니다.
 
-### ✨ 주요 특징
+### 🎯 핵심 아이디어
+- **❌ 시간 예약**: "오후 2시부터 3시까지 벤치프레스 예약"
+- **✅ 웨이팅**: "벤치프레스 대기 → 알림 받기 → 3세트 운동 → 자동 완료"
 
-- 🔔 **실시간 알림 시스템** - WebSocket 기반 즉시 알림
-- ⏰ **5분 유예시간** - 공정한 기회 제공 및 자동 순번 이동
-- 📱 **직관적인 UI** - 현재 상태 한눈에 파악
-- 🔄 **자동 대기열 관리** - 취소/만료 시 자동 순번 재배치
-- 🌐 **크로스 플랫폼** - 웹/모바일 반응형 지원
-- 📊 **실시간 모니터링** - 관리자 대시보드
+## ✨ 주요 특징
+
+### 🔔 **실시간 알림 시스템**
+- WebSocket 기반 즉시 알림
+- 브라우저 푸시 알림 + 진동(모바일)
+- 5분 유예시간 자동 관리
+
+### 🏋️ **세트별 운동 진행 추적**
+- 1~20세트 자유 설정 (기본 3세트)
+- 세트 완료 → 자동 휴식 타이머 → 다음 세트 시작
+- 마지막 세트 완료 시 **자동으로 다음 사람에게**
+- 실시간 진행률 표시 및 남은 휴식시간 카운트다운
+
+### 📱 **직관적인 사용 경험**
+- **시간 입력 불필요** - 대기열 등록만 하면 끝
+- 현재 상태 한눈에 파악 (운동 중 vs 휴식 중)
+- 유연한 제어 (휴식 건너뛰기, 운동 중단)
+- 크로스 플랫폼 반응형 지원
+
+### 🔄 **자동 대기열 관리**
+- 공정한 FIFO(First In, First Out) 순서
+- 취소/만료 시 자동 순번 재배치
+- 실시간 대기 현황 모니터링
+
 
 ## 🛠 기술 스택
 
@@ -26,22 +46,21 @@
 - **Passport.js** - Google OAuth 인증
 - **JWT** - 토큰 기반 인증
 
-
 ## 🏗 시스템 아키텍처
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│                 │    │                 │    │                 │
-│   React Client  │◄──►│  Express Server │◄──►│   PostgreSQL    │
-│                 │    │                 │    │                 │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         ▲                        ▲
-         │                        │
-         ▼                        ▼
-┌─────────────────┐    ┌─────────────────┐
-│   WebSocket     │    │   Google OAuth  │
-│   (실시간 알림)   │    │   (인증)        │
-└─────────────────┘    └─────────────────┘
+┌─────────────────┐    HTTP/WS     ┌─────────────────┐    Prisma    ┌─────────────────┐
+│                 │◄──────────────►│                 │◄────────────►│                 │
+│   React Client  │                │  Express Server │              │   PostgreSQL    │
+│                 │                │   + WebSocket   │              │                 │
+└─────────────────┘                └─────────────────┘              └─────────────────┘
+         ▲                                    ▲
+         │                                    │
+         ▼                                    ▼
+┌─────────────────┐                ┌─────────────────┐
+│  Browser Push   │                │   Google OAuth  │
+│  Notifications  │                │   Authentication │
+└─────────────────┘                └─────────────────┘
 ```
 
 ## 📊 데이터베이스 스키마
@@ -52,40 +71,28 @@
 ```sql
 - id: 고유 ID
 - equipmentId: 기구 ID (FK)
-- userId: 사용자 ID (FK)  
-- startedAt: 사용 시작 시간
-- endedAt: 사용 종료 시간
-- sets: 세트 수
-- restMinutes: 휴식 시간
-- status: 상태 (IN_USE, COMPLETED)
+- userId: 사용자 ID (FK)
+- totalSets: 전체 세트 수 (1~20)
+- currentSet: 현재 세트 (1부터 시작)
+- restMinutes: 세트간 휴식 시간 (0~10분)
+- status: 전체 상태 (IN_USE, COMPLETED)
+- setStatus: 세트 상태 (EXERCISING, RESTING, COMPLETED, STOPPED)
+- startedAt: 운동 시작 시간
+- currentSetStartedAt: 현재 세트 시작 시간
+- restStartedAt: 휴식 시작 시간
+- endedAt: 운동 완료 시간
 ```
 
-#### 2. WaitingQueue (대기열)```sql  
+#### 2. WaitingQueue (대기열)
+```sql
 - id: 고유 ID
 - equipmentId: 기구 ID (FK)
 - userId: 사용자 ID (FK)
-- queuePosition: 대기 순번
-- status: 상태 (WAITING, NOTIFIED, COMPLETED, CANCELLED, EXPIRED)
+- queuePosition: 대기 순번 (1, 2, 3...)
+- status: 대기 상태 (WAITING, NOTIFIED, COMPLETED, CANCELLED, EXPIRED)
 - createdAt: 등록 시간
 - notifiedAt: 알림 시간
 ```
-
-## 🚀 설치 및 실행
-
-### 1. 저장소 클론
-```bash
-git clone https://github.com/your-username/gym-waiting-system.git
-cd gym-waiting-system
-```
-
-### 2. 의존성 설치
-```bash
-# 백엔드 의존성
-npm install
-
-# WebSocket 추가 설치
-npm install ws
-
 
 
 ### 3.데이터베이스 설정
@@ -94,67 +101,86 @@ npm install ws
 npx prisma generate
 
 
-### 5. 서버 실행
+### 서버 실행
 npm run dev
 
-
-
 ### 6. 접속 확인
-- **API 서버**: http://localhost:4000
-- **WebSocket**: ws://localhost:4000/ws  
-
+서버 시작 시 다음과 같은 메시지가 출력됩니다:
+```
+🎉====================================🎉
+🚀 API 서버: http://localhost:4000
+🔌 WebSocket: ws://localhost:4000/ws
+📱 실시간 알림: 활성화
+🗄️  데이터베이스: 연결됨
+🌍 환경: development
+🎉====================================🎉
+```
 ## 📱 사용 방법
 
 ### 1. 회원가입 및 로그인
-- Google 계정으로 간편 로그인
+- Google 계정으로 간편 로그인 (OAuth 2.0)
 - 최초 로그인 시 자동 회원가입
 
 ### 2. 기구 둘러보기
-- 카테고리별 기구 목록 확인
-- 실시간 사용 현황 확인
-- 대기열 정보 확인
+- 카테고리별 기구 목록 (가슴, 등, 다리, 어깨, 팔, 유산소, 복근)
+- 실시간 사용 현황 및 대기열 정보 확인
 
-### 3. 기구 사용 시작
-**Case 1: 기구가 비어있을 때**
-```
-기구 선택 → "바로 시작" 버튼 → 사용 중 상태
-```
+### 3. 웨이팅 시스템 사용하기
 
-**Case 2: 기구가 사용 중일 때**  
+#### Case 1: 기구가 비어있을 때
 ```
-기구 선택 → "대기열 등록" → 순번 대기 → 알림 받기 → "시작" 버튼 (5분 내)
-```
-
-### 4. 기구 사용 완료
-```
-"사용 완료" 버튼 → 다음 대기자에게 자동 알림
+1. 기구 선택
+2. 운동 설정 (세트 수, 휴식 시간)
+3. "바로 시작" 클릭
+4. 세트별 운동 진행
+5. 자동 완료 → 다음 대기자에게 알림
 ```
 
-## 🔄 핵심 플로우
+#### Case 2: 기구가 사용 중일 때
+```
+1. 기구 선택
+2. "대기열 등록" 클릭 → 순번 받기
+3. 대기 중 (실시간 순번 확인)
+4. 알림 받기 "기구 사용 가능!" (5분 유예시간)
+5. "운동 시작" 클릭
+6. 세트별 운동 진행
+7. 자동 완료 → 다음 대기자에게 알림
+```
 
-### 웨이팅 시스템 동작 과정
+### 4. 세트별 운동 진행
+- **세트 시작**: 자동으로 현재 세트 표시
+- **세트 완료**: "세트 완료" 버튼 → 자동 휴식 시작
+- **휴식 중**: 카운트다운 타이머 → 자동으로 다음 세트
+- **휴식 건너뛰기**: "다음 세트 시작" 버튼으로 즉시 다음 세트
+- **운동 중단**: "중단" 버튼으로 언제든 종료 가능
+
+## 🔄 운동 플로우 상세
+
+### 🎯 **세트별 진행 예시** (3세트, 3분 휴식)
 
 ```mermaid
 graph TD
-    A[기구 선택] --> B{기구 상태 확인}
-    B -->|사용 가능| C[바로 시작]
-    B -->|사용 중| D[대기열 등록]
+    A[운동 시작] --> B[세트 1 운동 중]
+    B --> C[세트 완료 버튼]
+    C --> D[3분 휴식 타이머]
+    D --> E[자동으로 세트 2 시작]
+    E --> F[세트 완료 버튼]
+    F --> G[3분 휴식 타이머]
+    G --> H[자동으로 세트 3 시작]
+    H --> I[세트 완료 버튼]
+    I --> J[🎉 전체 운동 완료]
+    J --> K[다음 대기자에게 자동 알림]
     
-    D --> E[대기 순번 부여]
-    E --> F[현재 사용자 완료 대기]
-    F --> G[실시간 알림 발송]
-    G --> H{5분 내 응답?}
+    D --> L[휴식 건너뛰기]
+    L --> E
+    G --> M[휴식 건너뛰기]
+    M --> H
     
-    H -->|예| I[사용 시작]
-    H -->|아니오| J[자동 만료]
-    J --> K[다음 순번에게 알림]
-    
-    C --> L[사용 중 상태]
-    I --> L
-    L --> M[사용 완료]
-    M --> N[다음 대기자에게 알림]
+    B --> N[운동 중단]
+    E --> N
+    H --> N
+    N --> K
 ```
-
 ## 🎯 API 엔드포인트
 
 ### 인증 관련
@@ -172,20 +198,27 @@ GET    /api/equipment/categories     # 카테고리 목록
 GET    /api/equipment/:id            # 기구 상세 정보
 ```
 
-### 웨이팅 시스템
+### 웨이팅 시스템 - 대기열 관리
 ```http
-POST   /api/waiting/start-using/:equipmentId    # 기구 사용 시작
-POST   /api/waiting/finish-using/:equipmentId   # 기구 사용 완료
 POST   /api/waiting/queue/:equipmentId          # 대기열 등록
 DELETE /api/waiting/queue/:queueId              # 대기열 취소
 GET    /api/waiting/status/:equipmentId         # 기구 상태 조회
 GET    /api/waiting/my-queues                   # 내 대기열 현황
 ```
 
+### 웨이팅 시스템 - 운동 관리
+```http
+POST   /api/waiting/start-using/:equipmentId    # 운동 시작
+POST   /api/waiting/complete-set/:equipmentId   # 세트 완료 (핵심!)
+POST   /api/waiting/skip-rest/:equipmentId      # 휴식 건너뛰기
+POST   /api/waiting/stop-exercise/:equipmentId  # 운동 중단
+GET    /api/waiting/exercise-status/:equipmentId # 운동 상태 조회
+```
+
 ### 즐겨찾기
 ```http
 GET    /api/favorites                # 즐겨찾기 목록
-POST   /api/favorites                # 즐겨찾기 추가  
+POST   /api/favorites                # 즐겨찾기 추가
 DELETE /api/favorites/equipment/:id  # 즐겨찾기 제거
 ```
 
@@ -198,73 +231,84 @@ const ws = new WebSocket('ws://localhost:4000/ws')
 
 // 인증
 ws.send(JSON.stringify({
-  type: 'auth', 
+  type: 'auth',
   token: 'your-jwt-token'
 }))
 
 // 알림 수신
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data)
-  if (data.type === 'EQUIPMENT_AVAILABLE') {
-    // 기구 사용 가능 알림 처리
-    showNotification(data.message)
+  
+  switch(data.type) {
+    case 'EQUIPMENT_AVAILABLE':
+      // 🔔 기구 사용 가능 (5분 유예시간)
+      showNotification(data.message)
+      break
+      
+    case 'NEXT_SET_STARTED':
+      // 🏋️ 다음 세트 자동 시작
+      updateUI(data)
+      break
+      
+    case 'QUEUE_EXPIRED':
+      // ⏰ 대기열 시간 초과
+      handleExpired(data)
+      break
   }
 }
 ```
 
-### 알림 타입
-- **EQUIPMENT_AVAILABLE**: 기구 사용 가능 (5분 유예시간 시작)
-- **QUEUE_EXPIRED**: 시간 초과로 대기열에서 제거
-- **auth_success**: WebSocket 인증 성공
+### 알림 타입 상세
 
-## 👨‍💼 관리자 기능
-
-### 실시간 대시보드
-- 전체 기구 사용 현황 모니터링
-- 대기열 실시간 현황
-- 사용 통계 및 인사이트
-- 강제 사용 완료 기능 (긴급 상황 시)
-
-### 접근 방법
-```
-/admin 경로로 접속 (관리자 권한 필요)
+#### 🔔 **EQUIPMENT_AVAILABLE** - 기구 사용 가능
+```json
+{
+  "type": "EQUIPMENT_AVAILABLE",
+  "title": "기구 사용 가능!",
+  "message": "벤치프레스 기구를 사용할 수 있습니다! 5분 내에 시작해주세요.",
+  "equipmentId": 1,
+  "equipmentName": "벤치프레스",
+  "queueId": 123,
+  "graceMinutes": 5,
+  "urgency": "high"
+}
 ```
 
+#### 🏋️ **NEXT_SET_STARTED** - 다음 세트 시작
+```json
+{
+  "type": "NEXT_SET_STARTED", 
+  "title": "다음 세트 시작!",
+  "message": "2/3 세트를 시작하세요",
+  "equipmentId": 1,
+  "equipmentName": "벤치프레스",
+  "currentSet": 2,
+  "totalSets": 3
+}
+```
 
-### 웨이팅 시스템 시나리오 테스트
+#### ⏰ **QUEUE_EXPIRED** - 대기열 만료
+```json
+{
+  "type": "QUEUE_EXPIRED",
+  "title": "대기열 시간 초과", 
+  "message": "시간이 초과되어 대기열에서 제거되었습니다.",
+  "equipmentId": 1,
+  "equipmentName": "벤치프레스"
+}
+```
 
-1. **기본 플로우 테스트**
-   - 두 개의 브라우저 탭으로 서로 다른 계정 로그인
-   - 첫 번째 계정에서 기구 사용 시작
-   - 두 번째 계정에서 대기열 등록
-   - 첫 번째 계정에서 사용 완료
-   - 두 번째 계정에서 실시간 알림 확인
 
-2. **타임아웃 테스트**
-   - 대기열 등록 후 알림 받기
-   - 5분 대기 후 자동 만료 확인
-   - 다음 순번 자동 이동 확인
+
 
 ## 📈 성능 최적화
 
-### 데이터베이스 최적화
-- 복합 인덱스 설정: `(equipmentId, status)`
-- 유니크 제약조건: 중복 사용/대기 방지
-- 쿼리 최적화: 필요한 데이터만 조회
-
 ### WebSocket 최적화
-- 연결 풀 관리
-- 메모리 누수 방지
-- 자동 재연결 로직
+- **연결 풀 관리**: 비활성 연결 자동 정리 (5분)
+- **Heartbeat**: 30초마다 ping/pong으로 연결 상태 확인
+- **자동 재연결**: 네트워크 끊김 시 지수 백오프로 재연결
+- **메모리 관리**: WeakMap 사용으로 메모리 누수 방지
 
-### 캐싱 전략
-```javascript
-// Redis 캐싱 (선택사항)
-const redis = require('redis')
-const client = redis.createClient()
-
-// 기구 상태 캐싱 (30초)
-await client.setEx(`equipment:${id}:status`, 30, JSON.stringify(status))
 ```
 
 
@@ -289,38 +333,4 @@ const equipmentSchema = z.object({
 })
 ```
 
-### WebSocket 보안
-- 토큰 기반 WebSocket 인증
-- CORS 설정
-- Rate Limiting
-
-## 📊 모니터링 및 로깅
-
-### 로그 설정
-```javascript
-const winston = require('winston')
-
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.json(),
-  transports: [
-    new winston.transports.File({ filename: 'error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'combined.log' })
-  ]
-})
-```
-
-### 주요 메트릭
-- 동시 사용자 수
-- 평균 대기 시간
-- 기구별 사용 빈도
-- 알림 전달 성공률
-
-## 🤝 기여하기
-
-
-
-### 코드 스타일
-- ESLint + Prettier 설정 준수
-- 커밋 메시지: [Conventional Commits](https://conventionalcommits.org/) 형식
 
