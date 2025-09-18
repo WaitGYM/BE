@@ -6,7 +6,7 @@ const prisma = new PrismaClient()
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  callbackURL: "/api/auth/google/callback"
+  callbackURL: process.env.GOOGLE_REDIRECT_URI // 환경변수 사용
 }, async (accessToken, refreshToken, profile, done) => {
   try {
     // Google ID로 기존 사용자 확인

@@ -9,7 +9,7 @@ router.get("/google", (req, res) => {
   const redirectUrl =
     `https://accounts.google.com/o/oauth2/v2/auth?` +
     `client_id=${process.env.GOOGLE_CLIENT_ID}` +
-    `&redirect_uri=${process.env.GOOGLE_REDIRECT_URI}` +
+    `&redirect_uri=${encodeURIComponent(process.env.GOOGLE_REDIRECT_URI)}` + // 환경변수 사용
     `&response_type=code` +
     `&scope=profile email`;
   res.redirect(redirectUrl);
