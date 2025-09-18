@@ -18,32 +18,38 @@ const prisma = new PrismaClient()
 // Nginx 뒤에서 secure 쿠키 인식
 app.set('trust proxy', 1)
 
-// CORS: 프론트 도메인 정확히 지정 + 자격증명 허용
+// 3) CORS: 프론트 도메인 + 크리덴셜 허용
 app.use(cors({
-  origin: [
-    'https://waitgym.life', 
-    'https://www.waitgym.life', 
-    'https://waitgym-fe-web-two.vercel.app',
-    // 개발 환경을 위해 localhost도 포함 (필요시)
-    ...(process.env.NODE_ENV !== 'production' ? ['http://localhost:3000'] : [])
-  ],
-  credentials: true
-}))
+  origin: (origin, cb) => {
+    const allow = [
+      'https://waitgym.life',
+      'https://www.waitgym.life',
+      'https://waitgym-fe-web-two.vercel.app'
+    ];
+    // vercel 프리뷰 허용이 필요하면 아래 줄 추가:
+    // if (origin && new URL(origin).host.endsWith('.vercel.app')) return cb(null, true);
 
-app.use(express.json())
+    if (!origin || allow.includes(origin)) return cb(null, true);
+    return cb(new Error(`Not allowed by CORS: ${origin}`));
+  },
+  credentials: true,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization'],
+}));
+app.options('*', cors()); // 4) 프리플라이트 빠른 응답
+app.use(express.json());
 
-// 세션 설정 - HTTPS 환경에 맞게 수정
+// 5) 세션(크로스도메인 쿠키 세팅 필수)
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
-    httpOnly: true,
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // 다른 도메인과 통신이면 필수
-    secure: process.env.NODE_ENV === 'production', // HTTPS 전용 (프로덕션에서만)
-    maxAge: 24 * 60 * 60 * 1000 // 24시간
+    secure: process.env.NODE_ENV === 'production', // HTTPS에서만 전송
+    sameSite: 'none',                               // 크로스사이트 허용
+    // domain: '.waitgym.life',                    // 필요 시 주석 해제
   }
-}))
+}));
 
 // Passport 초기화
 const passport = require('passport')
