@@ -4,16 +4,22 @@ const prisma = new PrismaClient();
 const jwt = require("jsonwebtoken");
 const passport = require("passport");
 
-// 구글 OAuth 로그인 시작
-router.get("/google", (req, res) => {
-  const redirectUrl =
-    `https://accounts.google.com/o/oauth2/v2/auth?` +
-    `client_id=${process.env.GOOGLE_CLIENT_ID}` +
-    `&redirect_uri=${encodeURIComponent(process.env.GOOGLE_REDIRECT_URI)}` + // 환경변수 사용
-    `&response_type=code` +
-    `&scope=profile email`;
-  res.redirect(redirectUrl);
+// 구글 OAuth 로그인 시작 (권장: URLSearchParams로 안전 조립)
+router.get('/google', (req, res) => {
+  const params = new URLSearchParams({
+    client_id: process.env.GOOGLE_CLIENT_ID,
+    redirect_uri: process.env.GOOGLE_REDIRECT_URI,   // .env와 구글 콘솔 값과 완전 일치
+    response_type: 'code',
+    scope: 'openid email profile',                   // 권장 스코프(인코딩 자동)
+    // 선택(테스트/리프레시 토큰 필요 시):
+    // prompt: 'consent',
+    // access_type: 'offline',
+    // state: crypto.randomUUID(),
+  });
+
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
 });
+
 
 // 구글 OAuth 콜백
 router.get(
