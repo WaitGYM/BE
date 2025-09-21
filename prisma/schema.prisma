@@ -19,7 +19,11 @@ model User {
 
   createdAt    DateTime      @default(now())
   reservations Reservation[]
-  favorites    Favorite[]    // 즐겨찾기 관계 추가
+  favorites    Favorite[]
+  
+  // 웨이팅 시스템 관계 추가
+  equipmentUsages EquipmentUsage[]
+  waitingQueues   WaitingQueue[]
 }
 
 model Equipment {
@@ -30,7 +34,11 @@ model Equipment {
   muscleGroup  String?       // 세부 근육 그룹 (선택사항)
   createdAt    DateTime      @default(now())
   reservations Reservation[]
-  favorites    Favorite[]    // 즐겨찾기 관계 추가
+  favorites    Favorite[]
+  
+  // 웨이팅 시스템 관계 추가
+  equipmentUsages EquipmentUsage[]
+  waitingQueues   WaitingQueue[]
 }
 
 model Favorite {
@@ -45,6 +53,7 @@ model Favorite {
   @@unique([userId, equipmentId]) // 중복 즐겨찾기 방지
 }
 
+// 기존 예약 시스템 (시간 기반) - 호환성 유지
 model Reservation {
   id          Int      @id @default(autoincrement())
   userId      Int
@@ -59,4 +68,52 @@ model Reservation {
   equipment Equipment @relation(fields: [equipmentId], references: [id])
 
   @@index([equipmentId, startAt, endAt])
+}
+
+// 🔥 웨이팅 시스템: 현재 기구 사용 상태
+model EquipmentUsage {
+  id              Int       @id @default(autoincrement())
+  equipmentId     Int
+  userId          Int
+  startedAt       DateTime  @default(now())
+  endedAt         DateTime? // 사용 완료 시간
+  estimatedEndAt  DateTime? // 예상 종료 시간 (선택사항)
+  // 총 세트 & 휴식
+  totalSets          Int       @default(1)    // 총 세트 수
+  restMinutes        Int       @default(3)    // 세트 사이 휴식(분)
+
+  // 세션 상태
+  status             String    @default("IN_USE") // IN_USE | COMPLETED
+
+  // 🔥 세트/휴식 정밀 추적
+  currentSet          Int       @default(1)
+  setStatus           String    @default("EXERCISING") // EXERCISING | RESTING | COMPLETED | STOPPED | FORCE_COMPLETED
+  currentSetStartedAt DateTime?
+  restStartedAt       DateTime?
+
+  createdAt          DateTime  @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Restrict)
+
+  @@index([equipmentId, status])
+}
+
+// 🔥 웨이팅 시스템: 대기열 관리  
+model WaitingQueue {
+  id            Int       @id @default(autoincrement())
+  equipmentId   Int
+  userId        Int
+  queuePosition Int       // 대기 순서 (1, 2, 3, ...)
+  status        String    @default("WAITING") // WAITING, NOTIFIED, COMPLETED, CANCELLED, EXPIRED
+  createdAt     DateTime  @default(now())
+  notifiedAt    DateTime? // 알림 발송 시간
+  updatedAt     DateTime  @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  @@index([equipmentId, queuePosition])
+  @@index([equipmentId, status])
+  @@unique([equipmentId, userId, status], name: "unique_active_queue") // 같은 기구에 중복 대기 방지
 }
