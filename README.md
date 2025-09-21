@@ -207,12 +207,6 @@ graph TD
 
 ## 🔐 인증 시스템
 
-### Base URL
-```
-API: https://your-backend.com/api
-WebSocket: wss://your-backend.com/ws
-```
-
 ### 1. Google OAuth 로그인
 
 #### 로그인 시작
