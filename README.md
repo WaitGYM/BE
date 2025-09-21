@@ -778,9 +778,6 @@ DIRECT_URL="postgresql://..."
 # JWT
 JWT_SECRET="your-jwt-secret"
 
-# 세션
-SESSION_SECRET="your-session-secret"
-
 # Google OAuth
 GOOGLE_CLIENT_ID="your-google-client-id"
 GOOGLE_CLIENT_SECRET="your-google-client-secret"
