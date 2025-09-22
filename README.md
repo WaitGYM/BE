@@ -200,7 +200,7 @@ graph TD
 - `DELETE /api/reservations/:id` - 예약 삭제
 - `GET /api/reservations/availability` - 예약 가능 시간 확인
 
-### 수정된된⏰ Waiting System API (웨이팅 시스템)
+### ⏰ 수정된 Waiting System API (웨이팅 시스템)
 **🏋️ 운동 관리:**
 - `POST /api/waiting/start-using/:equipmentId` - 기구 사용 시작
 - `POST /api/waiting/complete-set/:equipmentId` - 세트 완료
