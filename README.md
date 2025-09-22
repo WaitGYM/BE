@@ -200,7 +200,7 @@ graph TD
 - `DELETE /api/reservations/:id` - 예약 삭제
 - `GET /api/reservations/availability` - 예약 가능 시간 확인
 
-### ⏰ Waiting System API (웨이팅 시스템)
+### 수정된된⏰ Waiting System API (웨이팅 시스템)
 **🏋️ 운동 관리:**
 - `POST /api/waiting/start-using/:equipmentId` - 기구 사용 시작
 - `POST /api/waiting/complete-set/:equipmentId` - 세트 완료
@@ -620,27 +620,6 @@ interface Reservation {
   restMinutes: number;
   status: string;
 }
-```
-
-## 🚀 사용 예시
-
-### 1. 기구 사용 시작
-```javascript
-// 1단계: 대기열 등록
-POST /api/waiting/queue/1
-
-// 2단계: 차례가 되면 사용 시작
-POST /api/waiting/start-using/1
-{
-  "totalSets": 4,
-  "restMinutes": 2
-}
-
-// 3단계: 세트 완료 반복
-POST /api/waiting/complete-set/1
-
-// 4단계: 필요시 휴식 스킵
-POST /api/waiting/skip-rest/1
 ```
 
 ## 🚨 에러 처리
