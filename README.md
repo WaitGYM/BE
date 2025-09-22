@@ -176,15 +176,48 @@ graph TD
 
 
 ## 🏋️ 헬스장 기구 예약 및 웨이팅 시스템 - Backend API 문서
-1. [시스템 개요](#시스템-개요)
-2. [인증 시스템](#인증-시스템)
-3. [기구 관리 API](#기구-관리-api)
-4. [예약 시스템 API](#예약-시스템-api)
-5. [즐겨찾기 API](#즐겨찾기-api)
-6. [웨이팅 시스템 API](#웨이팅-시스템-api)
-7. [실시간 알림 (WebSocket)](#실시간-알림-websocket)
-8. [데이터 모델](#데이터-모델)
-9. [환경 설정](#환경-설정)
+### 🔑 Auth API
+- `GET /api/auth/google` - Google OAuth 로그인 시작
+- `GET /api/auth/google/callback` - OAuth 콜백 처리
+- `GET /api/auth/me` - 현재 사용자 정보 조회
+- `POST /api/auth/logout` - 로그아웃
+
+### 📋 Equipment API  
+- `GET /api/equipment` - 기구 목록 조회 (카테고리/검색 필터 포함)
+- `GET /api/equipment/categories` - 카테고리 목록
+- `GET /api/equipment/:id` - 특정 기구 상세 조회
+
+### ⭐ Favorites API
+- `GET /api/favorites` - 내 즐겨찾기 목록
+- `POST /api/favorites` - 즐겨찾기 추가
+- `DELETE /api/favorites/equipment/:equipmentId` - 즐겨찾기 제거
+- `GET /api/favorites/check/:equipmentId` - 즐겨찾기 상태 확인
+
+### 📅 Reservations API (기존 예약 시스템)
+- `POST /api/reservations` - 예약 생성
+- `GET /api/reservations/me` - 내 예약 목록
+- `PUT /api/reservations/:id` - 예약 수정
+- `DELETE /api/reservations/:id` - 예약 삭제
+- `GET /api/reservations/availability` - 예약 가능 시간 확인
+
+### ⏰ Waiting System API (웨이팅 시스템)
+**🏋️ 운동 관리:**
+- `POST /api/waiting/start-using/:equipmentId` - 기구 사용 시작
+- `POST /api/waiting/complete-set/:equipmentId` - 세트 완료
+- `POST /api/waiting/skip-rest/:equipmentId` - 휴식 스킵
+- `POST /api/waiting/stop-exercise/:equipmentId` - 운동 중단
+- `GET /api/waiting/exercise-status/:equipmentId` - 운동 상태 조회
+
+**📝 대기열 관리:**
+- `POST /api/waiting/queue/:equipmentId` - 대기열 등록
+- `DELETE /api/waiting/queue/:queueId` - 대기열 취소
+- `GET /api/waiting/status/:equipmentId` - 기구 상태 및 대기열 조회
+
+**🔧 관리자 기능:**
+- `POST /api/waiting/reorder/:equipmentId` - 대기열 재정렬
+- `POST /api/waiting/force-complete/:equipmentId` - 강제 완료 처리
+- `GET /api/waiting/stats` - 사용 통계 조회
+- `POST /api/waiting/cleanup` - 만료된 데이터 정리
 
 ## 🎯 시스템 개요
 
@@ -197,428 +230,250 @@ graph TD
 - **즐겨찾기**: 자주 사용하는 기구 저장
 - **실시간 알림**: WebSocket을 통한 즉시 알림
 
-## 🔐 인증 시스템
+## 🔐 인증 (Authentication)
 
-### 1. Google OAuth 로그인
-
-#### 로그인 시작
-```http
-GET /api/auth/google
+### Headers
 ```
-- 사용자를 Google OAuth 페이지로 리다이렉트
-
-#### 로그인 콜백 (자동 처리됨)
-```http
-GET /api/auth/google/callback
-```
-- Google에서 콜백 후 프론트엔드로 리다이렉트
-- 성공: `${FRONTEND_URL}/oauth-success?token=JWT_TOKEN&user=USER_INFO`
-- 실패: `${FRONTEND_URL}/?error=auth_failed`
-
-#### 현재 사용자 정보 조회
-```http
-GET /api/auth/me
-Authorization: Bearer {JWT_TOKEN}
+Authorization: Bearer <JWT_TOKEN>
 ```
 
-**응답 예시:**
-```json
-{
-  "id": 1,
-  "email": "user@example.com",
-  "name": "홍길동",
-  "avatar": "https://lh3.googleusercontent.com/...",
-  "createdAt": "2025-01-01T00:00:00.000Z"
-}
-```
+---
 
-#### 로그아웃
-```http
-POST /api/auth/logout
-```
+## 📋 Equipment API
 
-## 🏋️ 기구 관리 API
+### GET `/api/equipment`
+기구 목록 조회 (인증 선택)
+- **Query Parameters:**
+  - `category` (optional): 카테고리 필터 ('가슴', '등', '다리', '어깨', '팔', '유산소' 등)
+  - `search` (optional): 검색어
+- **Request Body:** 없음
 
-### 1. 기구 목록 조회
-```http
-GET /api/equipment?category=가슴&search=벤치
-Authorization: Bearer {JWT_TOKEN} (선택사항)
-```
+### GET `/api/equipment/categories`
+카테고리 목록 조회
+- **Request Body:** 없음
 
-**쿼리 파라미터:**
-- `category` (선택): 카테고리 필터 (`가슴`, `등`, `다리`, `어깨`, `팔`, `유산소`)
-- `search` (선택): 기구명/근육그룹 검색
+### GET `/api/equipment/:id`
+특정 기구 상세 조회 (인증 선택)
+- **Request Body:** 없음
 
-**응답 예시:**
-```json
-[
-  {
-    "id": 8,
-    "name": "바벨 벤치 프레스",
-    "imageUrl": null,
-    "category": "가슴",
-    "muscleGroup": "대흉근, 삼두, 어깨",
-    "createdAt": "2025-01-01T00:00:00.000Z",
-    "reservationCount": 5,
-    "isFavorite": true
-  }
-]
-```
+---
 
-### 2. 카테고리 목록 조회
-```http
-GET /api/equipment/categories
-```
+## ⭐ Favorites API
 
-**응답 예시:**
-```json
-[
-  { "name": "가슴", "count": 3 },
-  { "name": "등", "count": 4 },
-  { "name": "다리", "count": 5 }
-]
-```
+### GET `/api/favorites`
+내 즐겨찾기 목록 조회 (인증 필요)
+- **Request Body:** 없음
 
-### 3. 특정 기구 상세 조회
-```http
-GET /api/equipment/{equipmentId}
-Authorization: Bearer {JWT_TOKEN} (선택사항)
-```
-
-**응답 예시:**
-```json
-{
-  "id": 8,
-  "name": "바벨 벤치 프레스",
-  "imageUrl": null,
-  "category": "가슴",
-  "muscleGroup": "대흉근, 삼두, 어깨",
-  "createdAt": "2025-01-01T00:00:00.000Z",
-  "reservations": [
-    {
-      "id": 1,
-      "startAt": "2025-01-01T10:00:00.000Z",
-      "endAt": "2025-01-01T10:30:00.000Z",
-      "user": { "name": "홍길동" }
-    }
-  ],
-  "isFavorite": false,
-  "favoriteCount": 12
-}
-```
-
-## 📅 예약 시스템 API
-
-### 1. 예약 생성
-```http
-POST /api/reservations
-Authorization: Bearer {JWT_TOKEN}
-Content-Type: application/json
-```
-
-**요청 바디:**
-```json
-{
-  "equipmentId": 1,
-  "startAt": "2025-01-01T10:00:00.000Z",
-  "endAt": "2025-01-01T10:30:00.000Z",
-  "sets": 3,
-  "restMinutes": 2
-}
-```
-
-**응답 예시:**
-```json
-{
-  "id": 1,
-  "equipmentId": 1,
-  "userId": 1,
-  "startAt": "2025-01-01T10:00:00.000Z",
-  "endAt": "2025-01-01T10:30:00.000Z",
-  "sets": 3,
-  "restMinutes": 2,
-  "status": "BOOKED",
-  "equipment": {
-    "id": 1,
-    "name": "바벨 벤치 프레스"
-  }
-}
-```
-
-### 2. 내 예약 목록 조회
-```http
-GET /api/reservations/me
-Authorization: Bearer {JWT_TOKEN}
-```
-
-### 3. 예약 가능 시간 확인
-```http
-GET /api/reservations/availability?equipmentId=1&date=2025-01-01&open=09:00&close=18:00&slotMinutes=30
-```
-
-**응답 예시:**
-```json
-{
-  "equipmentId": 1,
-  "date": "2025-01-01",
-  "slotMinutes": 30,
-  "slots": [
-    {
-      "startAt": "2025-01-01T09:00:00.000Z",
-      "endAt": "2025-01-01T09:30:00.000Z"
-    }
-  ],
-  "existingReservations": [
-    {
-      "id": 1,
-      "startAt": "2025-01-01T10:00:00.000Z",
-      "endAt": "2025-01-01T10:30:00.000Z",
-      "userName": "홍길동"
-    }
-  ]
-}
-```
-
-### 4. 예약 수정/삭제
-```http
-PUT /api/reservations/{reservationId}
-DELETE /api/reservations/{reservationId}
-Authorization: Bearer {JWT_TOKEN}
-```
-
-## ⭐ 즐겨찾기 API
-
-### 1. 내 즐겨찾기 목록
-```http
-GET /api/favorites
-Authorization: Bearer {JWT_TOKEN}
-```
-
-### 2. 즐겨찾기 추가
-```http
-POST /api/favorites
-Authorization: Bearer {JWT_TOKEN}
-Content-Type: application/json
-```
-
-**요청 바디:**
+### POST `/api/favorites`
+즐겨찾기 추가 (인증 필요)
 ```json
 {
   "equipmentId": 1
 }
 ```
 
-### 3. 즐겨찾기 제거
-```http
-DELETE /api/favorites/equipment/{equipmentId}
-Authorization: Bearer {JWT_TOKEN}
-```
+### DELETE `/api/favorites/equipment/:equipmentId`
+즐겨찾기 제거 (인증 필요)
+- **Request Body:** 없음
 
-### 4. 즐겨찾기 상태 확인
-```http
-GET /api/favorites/check/{equipmentId}
-Authorization: Bearer {JWT_TOKEN}
-```
+### GET `/api/favorites/check/:equipmentId`
+특정 기구 즐겨찾기 여부 확인 (인증 필요)
+- **Request Body:** 없음
 
-**응답 예시:**
+---
+
+## 📅 Reservations API (기존 예약 시스템)
+
+### POST `/api/reservations`
+예약 생성 (인증 필요)
 ```json
 {
-  "isFavorite": true
+  "equipmentId": 1,
+  "startAt": "2025-09-22T10:00:00.000Z",
+  "endAt": "2025-09-22T11:00:00.000Z",
+  "sets": 3,
+  "restMinutes": 3
 }
 ```
 
-## 🚶‍♂️ 웨이팅 시스템 API
+### GET `/api/reservations/me`
+내 예약 목록 (인증 필요)
+- **Request Body:** 없음
 
-웨이팅 시스템은 실시간으로 기구 사용 현황을 추적하고 대기열을 관리합니다.
+### GET `/api/reservations/all`
+전체 예약 목록 - 관리자용 (인증 필요)
+- **Request Body:** 없음
 
-### 🏃‍♂️ 운동 관리 API
+### GET `/api/reservations/:id`
+단건 예약 조회 (인증 필요)
+- **Request Body:** 없음
 
-#### 1. 기구 사용 시작
-```http
-POST /api/waiting/start-using/{equipmentId}
-Authorization: Bearer {JWT_TOKEN}
-Content-Type: application/json
-```
-
-**요청 바디:**
+### PUT `/api/reservations/:id`
+예약 수정 (인증 필요)
 ```json
 {
-  "totalSets": 3,
+  "equipmentId": 1,
+  "startAt": "2025-09-22T10:00:00.000Z",
+  "endAt": "2025-09-22T11:00:00.000Z",
+  "sets": 4,
   "restMinutes": 2
 }
 ```
+*모든 필드 선택적*
 
-**응답 예시:**
+### DELETE `/api/reservations/:id`
+예약 삭제 (인증 필요)
+- **Request Body:** 없음
+
+### GET `/api/reservations/availability`
+예약 가능 시간 확인
+- **Query Parameters:**
+  - `equipmentId`: 기구 ID (필수)
+  - `date`: 날짜 YYYY-MM-DD (필수)
+  - `open`: 운영 시작시간 (기본: 09:00)
+  - `close`: 운영 종료시간 (기본: 18:00)
+  - `slotMinutes`: 슬롯 간격(분) (기본: 30)
+- **Request Body:** 없음
+
+### GET `/api/reservations/equipment/:equipmentId`
+특정 기구의 예약 현황 조회
+- **Query Parameters:**
+  - `date`: 날짜 YYYY-MM-DD (기본: 오늘)
+- **Request Body:** 없음
+
+---
+
+## 수정된⏰ Waiting System API (웨이팅 시스템)
+
+### 🏋️ 운동 관리
+
+#### POST `/api/waiting/start-using/:equipmentId`
+기구 사용 시작 (인증 필요)
 ```json
 {
-  "id": 1,
-  "equipmentId": 1,
-  "equipmentName": "바벨 벤치 프레스",
   "totalSets": 3,
-  "currentSet": 1,
-  "setStatus": "EXERCISING",
-  "restMinutes": 2,
-  "startedAt": "2025-01-01T10:00:00.000Z",
-  "currentSetStartedAt": "2025-01-01T10:00:00.000Z",
-  "estimatedEndAt": "2025-01-01T10:15:00.000Z",
-  "progress": 33
+  "restMinutes": 3
 }
 ```
 
-#### 2. 세트 완료
-```http
-POST /api/waiting/complete-set/{equipmentId}
-Authorization: Bearer {JWT_TOKEN}
-```
+#### POST `/api/waiting/complete-set/:equipmentId`
+세트 완료 (인증 필요)
+- **Request Body:** 없음
 
-**응답 예시:**
-```json
-{
-  "message": "1/3 세트 완료",
-  "setStatus": "RESTING"
-}
-```
+#### POST `/api/waiting/skip-rest/:equipmentId`
+휴식 스킵 (인증 필요)
+- **Request Body:** 없음
 
-#### 3. 휴식 스킵 (다음 세트 바로 시작)
-```http
-POST /api/waiting/skip-rest/{equipmentId}
-Authorization: Bearer {JWT_TOKEN}
-```
+#### POST `/api/waiting/stop-exercise/:equipmentId`
+운동 중단 (인증 필요)
+- **Request Body:** 없음
 
-#### 4. 운동 중단
-```http
-POST /api/waiting/stop-exercise/{equipmentId}
-Authorization: Bearer {JWT_TOKEN}
-```
+#### GET `/api/waiting/exercise-status/:equipmentId`
+운동 상태 조회 (인증 필요)
+- **Request Body:** 없음
 
-#### 5. 운동 상태 조회
-```http
-GET /api/waiting/exercise-status/{equipmentId}
-Authorization: Bearer {JWT_TOKEN}
-```
+### 📝 대기열 관리
 
-**응답 예시:**
-```json
-{
-  "equipmentId": 1,
-  "equipmentName": "바벨 벤치 프레스",
-  "totalSets": 3,
-  "currentSet": 2,
-  "setStatus": "RESTING",
-  "restMinutes": 2,
-  "restTimeLeftSec": 45,
-  "currentSetElapsedSec": 180,
-  "etaMinutes": 8,
-  "progress": 67
-}
-```
+#### POST `/api/waiting/queue/:equipmentId`
+대기열 등록 (인증 필요)
+- **Request Body:** 없음
 
-### 📝 대기열 관리 API
+#### DELETE `/api/waiting/queue/:queueId`
+대기열 취소 (인증 필요)
+- **Request Body:** 없음
 
-#### 1. 대기열 등록
-```http
-POST /api/waiting/queue/{equipmentId}
-Authorization: Bearer {JWT_TOKEN}
-```
-
-**응답 예시:**
-```json
-{
-  "id": 1,
-  "queuePosition": 2,
-  "equipmentId": 1,
-  "equipmentName": "바벨 벤치 프레스",
-  "status": "WAITING"
-}
-```
-
-#### 2. 대기 취소
-```http
-DELETE /api/waiting/queue/{queueId}
-Authorization: Bearer {JWT_TOKEN}
-```
-
-#### 3. 기구 상태 조회 (현재 사용자 + 대기열)
-```http
-GET /api/waiting/status/{equipmentId}
-```
-
-**응답 예시:**
-```json
-{
-  "equipmentId": 1,
-  "equipmentName": "바벨 벤치 프레스",
-  "isAvailable": false,
-  "currentUser": {
-    "name": "홍길동",
-    "startedAt": "2025-01-01T10:00:00.000Z",
-    "totalSets": 3,
-    "currentSet": 2,
-    "setStatus": "EXERCISING",
-    "restMinutes": 2,
-    "progress": 67,
-    "estimatedEndAt": "2025-01-01T10:15:00.000Z",
-    "estimatedWaitMinutes": 5
-  },
-  "waitingQueue": [
-    {
-      "id": 1,
-      "position": 1,
-      "userName": "김철수",
-      "status": "WAITING",
-      "createdAt": "2025-01-01T10:05:00.000Z",
-      "estimatedWaitMinutes": 10
-    }
-  ],
-  "totalWaiting": 1,
-  "averageWaitTime": 10
-}
-```
+#### GET `/api/waiting/status/:equipmentId`
+기구 상태 및 대기열 조회 (공개)
+- **Request Body:** 없음
 
 ### 🔧 관리자 기능
 
-#### 1. 대기열 재정렬
-```http
-POST /api/waiting/reorder/{equipmentId}
-Authorization: Bearer {JWT_TOKEN}
+#### POST `/api/waiting/reorder/:equipmentId`
+대기열 재정렬 (인증 필요)
+- **Request Body:** 없음
+
+#### POST `/api/waiting/force-complete/:equipmentId`
+강제 완료 처리 (인증 필요)
+- **Request Body:** 없음
+
+#### GET `/api/waiting/stats`
+사용 통계 조회 (인증 필요)
+- **Request Body:** 없음
+
+#### POST `/api/waiting/cleanup`
+만료된 데이터 정리 (인증 필요)
+- **Request Body:** 없음
+
+---
+
+## 🔑 Auth API
+
+### GET `/api/auth/google`
+Google OAuth 로그인 시작
+- **Request Body:** 없음
+- **Response:** Google OAuth 페이지로 리다이렉트
+
+### GET `/api/auth/google/callback`
+Google OAuth 콜백 (자동 처리)
+- **Request Body:** 없음
+
+### POST `/api/auth/logout`
+로그아웃 (인증 필요)
+- **Request Body:** 없음
+
+### GET `/api/auth/me`
+현재 사용자 정보 조회 (인증 필요)
+- **Request Body:** 없음
+
+---
+
+## 🌐 WebSocket API
+
+### WebSocket 연결
+```
+ws://localhost:4000/ws
 ```
 
-#### 2. 강제 완료 (관리자)
-```http
-POST /api/waiting/force-complete/{equipmentId}
-Authorization: Bearer {JWT_TOKEN}
-```
-
-#### 3. 통계 조회
-```http
-GET /api/waiting/stats
-Authorization: Bearer {JWT_TOKEN}
-```
-
-**응답 예시:**
+### 인증 메시지
 ```json
 {
-  "today": {
-    "totalSessions": 45,
-    "averageSets": 3
-  },
-  "week": {
-    "totalSessions": 312
-  },
-  "current": {
-    "activeUsers": 5,
-    "waitingUsers": 8,
-    "totalUsers": 13
-  },
-  "popularEquipment": [
-    {
-      "equipmentId": 1,
-      "equipmentName": "바벨 벤치 프레스",
-      "usageCount": 23
-    }
-  ]
+  "type": "auth",
+  "token": "<JWT_TOKEN>"
 }
 ```
+
+### 수신 알림 타입
+- `EQUIPMENT_AVAILABLE`: 기구 사용 가능
+- `REST_STARTED`: 휴식 시작
+- `NEXT_SET_STARTED`: 다음 세트 시작
+- `EXERCISE_STOPPED`: 운동 중단
+- `QUEUE_CANCELLED`: 대기 취소
+- `QUEUE_EXPIRED`: 대기 만료
+- `FORCE_COMPLETED`: 관리자 강제 완료
+- `SET_SKIPPED`: 휴식 스킵
+
+---
+
+## 📊 Response Format
+
+### 성공 응답
+```json
+{
+  "id": 1,
+  "data": "..."
+}
+```
+
+### 오류 응답
+```json
+{
+  "error": "오류 메시지",
+  "details": "상세 정보 (선택적)"
+}
+```
+
+---
+
 
 ## 🔔 실시간 알림 (WebSocket)
 
@@ -767,33 +622,25 @@ interface Reservation {
 }
 ```
 
-## ⚙️ 환경 설정
+## 🚀 사용 예시
 
-### 필수 환경 변수
-```env
-# 데이터베이스
-DATABASE_URL="postgresql://..."
-DIRECT_URL="postgresql://..."
+### 1. 기구 사용 시작
+```javascript
+// 1단계: 대기열 등록
+POST /api/waiting/queue/1
 
-# JWT
-JWT_SECRET="your-jwt-secret"
+// 2단계: 차례가 되면 사용 시작
+POST /api/waiting/start-using/1
+{
+  "totalSets": 4,
+  "restMinutes": 2
+}
 
-# Google OAuth
-GOOGLE_CLIENT_ID="your-google-client-id"
-GOOGLE_CLIENT_SECRET="your-google-client-secret"
-GOOGLE_REDIRECT_URI="https://your-backend.com/api/auth/google/callback"
+// 3단계: 세트 완료 반복
+POST /api/waiting/complete-set/1
 
-# 프론트엔드 URL
-FRONTEND_URL="https://your-frontend.com"
-
-# CORS 설정
-CORS_ORIGINS="https://your-frontend.com,http://localhost:3000"
-CORS_ORIGINS_REGEX="^https:\\/\\/.*\\.vercel\\.app$"
-CORS_DEBUG="0"
-
-# 서버
-PORT="4000"
-NODE_ENV="production"
+// 4단계: 필요시 휴식 스킵
+POST /api/waiting/skip-rest/1
 ```
 
 ## 🚨 에러 처리
