@@ -46,7 +46,38 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
       where: { userId, status: 'IN_USE' }
     })
   }
-
+// 🆕 오늘 내가 완료한 기구들 추가
+  let myCompletedToday = new Map()
+  if (userId) {
+    const today = new Date()
+    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+    
+    const completedUsages = await prisma.equipmentUsage.findMany({
+      where: {
+        userId,
+        equipmentId: { in: equipmentIds },
+        status: 'COMPLETED',
+        endedAt: { gte: startOfDay }
+      },
+      orderBy: { endedAt: 'desc' }
+    })
+    
+    completedUsages.forEach(usage => {
+      if (!myCompletedToday.has(usage.equipmentId)) {
+        const durationMin = usage.startedAt && usage.endedAt
+          ? Math.round((new Date(usage.endedAt) - new Date(usage.startedAt)) / 60000)
+          : null
+        myCompletedToday.set(usage.equipmentId, {
+          status: usage.status,
+          lastCompletedAt: usage.endedAt,
+          totalSets: usage.currentSet,
+          setStatus: usage.setStatus,
+          duration: Math.round((new Date(usage.endedAt) - new Date(usage.startedAt)) / 60000)
+        })
+      }
+    })
+  }
+  
   // 기구별 상태 정보 매핑
   const statusMap = new Map()
   
@@ -75,7 +106,15 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
       myQueuePosition: myQueue ? myQueue.queuePosition : null,
       myQueueStatus: myQueue ? myQueue.status : null,
       canStart: userId ? canStart : false,
-      canQueue: userId ? canQueue : false
+      canQueue: userId ? canQueue : false,
+
+      // 🆕 완료 표시 정보 추가
+      completedToday: userId ? !!myCompleted : false,
+      lastCompletedAt: myCompleted ? myCompleted.lastCompletedAt : null,
+      lastCompletedSets: myCompleted ? myCompleted.totalSets : null,
+      lastCompletedDuration: myCompleted ? myCompleted.duration : null,
+      wasFullyCompleted: myCompleted ? myCompleted.Status === 'COMPLETED' : false
+
     })
   })
 
@@ -158,7 +197,14 @@ router.get('/', async (req, res) => {
           myQueuePosition: null,
           myQueueStatus: null,
           canStart: false,
-          canQueue: false
+          canQueue: false,
+
+          // 완료 기본값
+          completedToday: false,
+          lastCompletedAt: null,
+          lastCompletedSets: null,
+          lastCompletedDuration: null,
+          wasFullyCompleted: false
         }
       }
 
@@ -320,6 +366,171 @@ router.get('/status', async (req, res) => {
   } catch (error) {
     console.error('기구 상태 조회 오류:', error)
     res.status(500).json({ error: '기구 상태를 불러올 수 없습니다' })
+  }
+})
+
+/* ===========================
+ * 🆕 내가 완료한 운동/통계 API 추가
+ * =========================== */
+
+// 🔥 내가 사용한 기구 목록 (운동 완료 표시용)
+router.get('/my-completed', auth(), async (req, res) => {
+  try {
+    const { date, limit = 20 } = req.query
+    
+    let where = {
+      userId: req.user.id,
+      status: 'COMPLETED'
+    }
+    
+    // 특정 날짜 필터링
+    if (date) {
+      const targetDate = new Date(date)
+      const startOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate())
+      const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000 - 1)
+      
+      where.endedAt = {
+        gte: startOfDay,
+        lte: endOfDay
+      }
+    }
+
+    const completedUsages = await prisma.equipmentUsage.findMany({
+      where,
+      include: {
+        equipment: {
+          select: {
+            id: true,
+            name: true,
+            category: true,
+            muscleGroup: true,
+            imageUrl: true
+          }
+        }
+      },
+      orderBy: { endedAt: 'desc' },
+      take: parseInt(limit)
+    })
+
+    const response = completedUsages.map(usage => ({
+      id: usage.id,
+      equipmentId: usage.equipmentId,
+      equipment: usage.equipment,
+      startedAt: usage.startedAt,
+      endedAt: usage.endedAt,
+      totalSets: usage.totalSets,
+      completedSets: usage.currentSet,
+      restMinutes: typeof usage.restSeconds === 'number' ? Math.floor(usage.restSeconds / 60) : null,
+      setStatus: usage.setStatus,
+      duration: (usage.startedAt && usage.endedAt)
+        ? Math.round((new Date(usage.endedAt) - new Date(usage.startedAt)) / 60000)
+        : null, // 분 단위
+      isFullyCompleted: usage.setStatus === 'COMPLETED', // 모든 세트 완료 여부
+      wasInterrupted: ['STOPPED', 'FORCE_COMPLETED'].includes(usage.setStatus) // 중단된 운동
+    }))
+
+    res.json(response)
+  } catch (error) {
+    console.error('완료된 운동 조회 오류:', error)
+    res.status(500).json({ error: '완료된 운동 목록을 불러올 수 없습니다' })
+  }
+})
+
+// 🔥 운동 통계 API
+router.get('/my-stats', auth(), async (req, res) => {
+  try {
+    const { period = 'week' } = req.query // today, week, month, year
+    
+    let startDate
+    const now = new Date()
+    
+    switch (period) {
+      case 'today':
+        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        break
+      case 'week':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+        break
+      case 'month':
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1)
+        break
+      case 'year':
+        startDate = new Date(now.getFullYear(), 0, 1)
+        break
+      default:
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+    }
+
+    const stats = await prisma.equipmentUsage.findMany({
+      where: {
+        userId: req.user.id,
+        status: 'COMPLETED',
+        endedAt: { gte: startDate }
+      },
+      include: {
+        equipment: {
+          select: { id: true, name: true, category: true }
+        }
+      },
+      orderBy: { endedAt: 'asc' }
+    })
+
+    // 기구별 사용 횟수/세트/시간
+    const equipmentStats = stats.reduce((acc, usage) => {
+      const key = usage.equipmentId
+      if (!acc[key]) {
+        acc[key] = {
+          equipment: usage.equipment,
+          count: 0,
+          totalSets: 0,
+          totalMinutes: 0,
+          lastUsed: null
+        }
+      }
+      acc[key].count++
+      acc[key].totalSets += (usage.currentSet || 0)
+      if (usage.startedAt && usage.endedAt) {
+        acc[key].totalMinutes += Math.round((new Date(usage.endedAt) - new Date(usage.startedAt)) / 60000)
+        acc[key].lastUsed = !acc[key].lastUsed || usage.endedAt > acc[key].lastUsed ? usage.endedAt : acc[key].lastUsed
+      }
+      return acc
+    }, {})
+
+    // 카테고리별 통계
+    const categoryStatsMap = stats.reduce((acc, usage) => {
+      const category = usage.equipment?.category || '기타'
+      if (!acc[category]) {
+        acc[category] = { count: 0, totalSets: 0 }
+      }
+      acc[category].count++
+      acc[category].totalSets += (usage.currentSet || 0)
+      return acc
+    }, {})
+
+    const totalSets = stats.reduce((sum, u) => sum + (u.currentSet || 0), 0)
+    const totalMinutes = stats.reduce((sum, u) => {
+      if (u.startedAt && u.endedAt) {
+        return sum + Math.round((new Date(u.endedAt) - new Date(u.startedAt)) / 60000)
+      }
+      return sum
+    }, 0)
+
+    res.json({
+      period,
+      totalWorkouts: stats.length,
+      totalSets,
+      totalMinutes,
+      averageSetsPerWorkout: stats.length ? Math.round(totalSets / stats.length) : 0,
+      equipmentStats: Object.values(equipmentStats).sort((a, b) => b.count - a.count),
+      categoryStats: Object.entries(categoryStatsMap).map(([category, data]) => ({
+        category,
+        ...data
+      })).sort((a, b) => b.count - a.count),
+      recentWorkouts: stats.slice(-5).reverse()
+    })
+  } catch (error) {
+    console.error('운동 통계 조회 오류:', error)
+    res.status(500).json({ error: '운동 통계를 불러올 수 없습니다' })
   }
 })
 
@@ -561,5 +772,6 @@ router.post('/:id/quick-queue', auth(), async (req, res) => {
     res.status(500).json({ error: '대기열 등록에 실패했습니다' })
   }
 })
+
 
 module.exports = router
