@@ -67,7 +67,7 @@ model Reservation {
   startAt     DateTime
   endAt       DateTime
   sets        Int      @default(1)
-  restMinutes Int      @default(3)
+  restSeconds Int      @default(180)
   status      String   @default("BOOKED")
 
   user      User      @relation(fields: [userId], references: [id])
@@ -86,7 +86,7 @@ model EquipmentUsage {
   estimatedEndAt  DateTime? // 예상 종료 시간 (선택사항)
   // 총 세트 & 휴식
   totalSets          Int       @default(1)    // 총 세트 수
-  restMinutes        Int       @default(3)    // 세트 사이 휴식(분)
+  restSeconds        Int       @default(180)    // 세트 사이 휴식(분)
 
   // 세션 상태
   status             String    @default("IN_USE") // IN_USE | COMPLETED
