@@ -8,6 +8,9 @@ const http = require('http')
 const passport = require('passport')
 const { PrismaClient } = require('@prisma/client')
 
+// Routes 섹션에 추가
+const routineRoutes = require('./routes/routines')
+
 // Passport 설정 로드
 require('./config/passport')
 
@@ -108,7 +111,7 @@ app.use('/api/equipment', equipmentRoutes)
 app.use('/api/reservations', reservationRoutes)
 app.use('/api/favorites', favoriteRoutes)
 app.use('/api/waiting', waitingRoutes) // 웨이팅 시스템
-
+app.use('/api/routines', routineRoutes) //루틴
 /** ===================== WebSocket ===================== */
 setupWebSocket(server)
 
