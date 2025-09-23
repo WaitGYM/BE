@@ -24,6 +24,9 @@ model User {
   // 웨이팅 시스템 관계 추가
   equipmentUsages EquipmentUsage[]
   waitingQueues   WaitingQueue[]
+
+  // 🆕 루틴 시스템 관계
+  workoutRoutines WorkoutRoutine[]
 }
 
 model Equipment {
@@ -39,6 +42,9 @@ model Equipment {
   // 웨이팅 시스템 관계 추가
   equipmentUsages EquipmentUsage[]
   waitingQueues   WaitingQueue[]
+
+  // 🆕 루틴 시스템 관계
+  routineExercises RoutineExercise[]
 }
 
 model Favorite {
@@ -116,4 +122,38 @@ model WaitingQueue {
   @@index([equipmentId, queuePosition])
   @@index([equipmentId, status])
   @@unique([equipmentId, userId, status], name: "unique_active_queue") // 같은 기구에 중복 대기 방지
+}
+
+// 🆕 운동 루틴 모델
+model WorkoutRoutine {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  name        String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exercises RoutineExercise[]
+
+  @@index([userId, isActive])
+}
+
+// 🆕 루틴 내 운동 항목 모델
+model RoutineExercise {
+  id          Int     @id @default(autoincrement())
+  routineId   Int
+  equipmentId Int
+  order       Int     // 루틴 내 순서
+  targetSets  Int     @default(3)
+  targetReps  String? // "8-12" 또는 "10" 형태
+  restMinutes Int     @default(3)
+  notes       String? // 개인 메모 (무게, 특이사항 등)
+  createdAt   DateTime @default(now())
+
+  routine   WorkoutRoutine @relation(fields: [routineId], references: [id], onDelete: Cascade)
+  equipment Equipment      @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  @@unique([routineId, equipmentId]) // 한 루틴에 같은 기구 중복 방지
+  @@index([routineId, order])
 }
