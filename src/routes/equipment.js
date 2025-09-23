@@ -5,10 +5,87 @@ const { z } = require('zod')
 const jwt = require('jsonwebtoken')
 const prisma = new PrismaClient()
 
-// 목록 조회 (공개) - 카테고리 필터링 지원
+// 🔥 실시간 상태 조회 헬퍼 함수
+async function getEquipmentStatusInfo(equipmentIds, userId = null) {
+  // 현재 사용 중인 기구들
+  const currentUsages = await prisma.equipmentUsage.findMany({
+    where: {
+      equipmentId: { in: equipmentIds },
+      status: 'IN_USE'
+    },
+    include: {
+      user: { select: { name: true } }
+    }
+  })
+
+  // 대기열 정보
+  const waitingQueues = await prisma.waitingQueue.findMany({
+    where: {
+      equipmentId: { in: equipmentIds },
+      status: { in: ['WAITING', 'NOTIFIED'] }
+    },
+    orderBy: { queuePosition: 'asc' }
+  })
+
+  // 내 대기 정보 (로그인한 경우)
+  let myQueues = []
+  if (userId) {
+    myQueues = await prisma.waitingQueue.findMany({
+      where: {
+        userId,
+        equipmentId: { in: equipmentIds },
+        status: { in: ['WAITING', 'NOTIFIED'] }
+      }
+    })
+  }
+
+  // 내가 현재 사용 중인 기구
+  let myCurrentUsage = null
+  if (userId) {
+    myCurrentUsage = await prisma.equipmentUsage.findFirst({
+      where: { userId, status: 'IN_USE' }
+    })
+  }
+
+  // 기구별 상태 정보 매핑
+  const statusMap = new Map()
+  
+  equipmentIds.forEach(equipmentId => {
+    const currentUsage = currentUsages.find(u => u.equipmentId === equipmentId)
+    const queueCount = waitingQueues.filter(q => q.equipmentId === equipmentId).length
+    const myQueue = myQueues.find(q => q.equipmentId === equipmentId)
+    
+    const isAvailable = !currentUsage
+    const canStart = isAvailable && !myQueue && (!myCurrentUsage || myCurrentUsage.equipmentId === equipmentId)
+    const canQueue = !isAvailable && !myQueue && (!myCurrentUsage || myCurrentUsage.equipmentId === equipmentId)
+
+    statusMap.set(equipmentId, {
+      isAvailable,
+      currentUser: currentUsage ? currentUsage.user.name : null,
+      currentUserStartedAt: currentUsage ? currentUsage.startedAt : null,
+      currentUsageInfo: currentUsage ? {
+        totalSets: currentUsage.totalSets,
+        currentSet: currentUsage.currentSet,
+        setStatus: currentUsage.setStatus,
+        restSeconds: currentUsage.restSeconds,
+        progress: Math.round((currentUsage.currentSet / currentUsage.totalSets) * 100),
+        estimatedEndAt: currentUsage.estimatedEndAt
+      } : null,
+      waitingCount: queueCount,
+      myQueuePosition: myQueue ? myQueue.queuePosition : null,
+      myQueueStatus: myQueue ? myQueue.status : null,
+      canStart: userId ? canStart : false,
+      canQueue: userId ? canQueue : false
+    })
+  })
+
+  return statusMap
+}
+
+// 🔥 목록 조회 (실시간 상태 포함)
 router.get('/', async (req, res) => {
   try {
-    const { category, search } = req.query
+    const { category, search, include_status = 'true' } = req.query
     const header = req.headers.authorization || ''
     const token = header.startsWith('Bearer ') ? header.slice(7) : null
     let userId = null
@@ -31,7 +108,6 @@ router.get('/', async (req, res) => {
     if (search) {
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
         { muscleGroup: { contains: search, mode: 'insensitive' } }
       ]
     }
@@ -51,17 +127,43 @@ router.get('/', async (req, res) => {
       }
     })
 
+    // 🔥 실시간 상태 정보 조회
+    let statusMap = new Map()
+    if (include_status === 'true') {
+      const equipmentIds = list.map(eq => eq.id)
+      statusMap = await getEquipmentStatusInfo(equipmentIds, userId)
+    }
+
     // 응답 데이터 가공
-    const response = list.map(equipment => ({
-      id: equipment.id,
-      name: equipment.name,
-      imageUrl: equipment.imageUrl,
-      category: equipment.category,
-      muscleGroup: equipment.muscleGroup,
-      createdAt: equipment.createdAt,
-      reservationCount: equipment._count.reservations,
-      isFavorite: userId ? equipment.favorites.length > 0 : false
-    }))
+    const response = list.map(equipment => {
+      const baseInfo = {
+        id: equipment.id,
+        name: equipment.name,
+        imageUrl: equipment.imageUrl,
+        category: equipment.category,
+        muscleGroup: equipment.muscleGroup,
+        createdAt: equipment.createdAt,
+        reservationCount: equipment._count.reservations,
+        isFavorite: userId ? equipment.favorites.length > 0 : false
+      }
+
+      // 🔥 실시간 상태 정보 추가
+      if (include_status === 'true') {
+        baseInfo.status = statusMap.get(equipment.id) || {
+          isAvailable: true,
+          currentUser: null,
+          currentUserStartedAt: null,
+          currentUsageInfo: null,
+          waitingCount: 0,
+          myQueuePosition: null,
+          myQueueStatus: null,
+          canStart: false,
+          canQueue: false
+        }
+      }
+
+      return baseInfo
+    })
 
     res.json(response)
   } catch (error) {
@@ -70,15 +172,30 @@ router.get('/', async (req, res) => {
   }
 })
 
-// 기구 검색 (상태 정보 포함)
+// 🔥 기구 검색 (기존 코드 간소화)
 router.get('/search', async (req, res) => {
   try {
     const { q, category, available_only } = req.query
+    
+    // 기본 목록 조회와 동일한 로직 사용
+    const queryParams = new URLSearchParams({
+      ...(q && { search: q }),
+      ...(category && { category }),
+      include_status: 'true'
+    })
+    
+    // 내부적으로 기본 목록 조회 재사용
+    req.query = { 
+      search: q, 
+      category, 
+      include_status: 'true' 
+    }
+    
+    // 기본 목록 조회 로직 재사용
     const header = req.headers.authorization || ''
     const token = header.startsWith('Bearer ') ? header.slice(7) : null
     let userId = null
 
-    // 토큰이 있으면 사용자 ID 추출 (선택적)
     if (token) {
       try {
         const payload = jwt.verify(token, process.env.JWT_SECRET)
@@ -114,77 +231,21 @@ router.get('/search', async (req, res) => {
       }
     })
 
-    // 현재 사용 상태 조회
+    // 실시간 상태 정보 조회
     const equipmentIds = equipmentList.map(eq => eq.id)
-    const currentUsages = await prisma.equipmentUsage.findMany({
-      where: {
-        equipmentId: { in: equipmentIds },
-        status: 'IN_USE'
-      },
-      include: {
-        user: { select: { name: true } }
-      }
-    })
-
-    // 대기열 정보 조회
-    const waitingQueues = await prisma.waitingQueue.findMany({
-      where: {
-        equipmentId: { in: equipmentIds },
-        status: { in: ['WAITING', 'NOTIFIED'] }
-      }
-    })
-
-    // 내 대기 정보 (로그인한 경우)
-    let myQueues = []
-    if (userId) {
-      myQueues = await prisma.waitingQueue.findMany({
-        where: {
-          userId,
-          equipmentId: { in: equipmentIds },
-          status: { in: ['WAITING', 'NOTIFIED'] }
-        }
-      })
-    }
-
-    // 내가 현재 사용 중인 기구
-    let myCurrentUsage = null
-    if (userId) {
-      myCurrentUsage = await prisma.equipmentUsage.findFirst({
-        where: { userId, status: 'IN_USE' }
-      })
-    }
+    const statusMap = await getEquipmentStatusInfo(equipmentIds, userId)
 
     // 응답 데이터 구성
-    let response = equipmentList.map(equipment => {
-      const currentUsage = currentUsages.find(u => u.equipmentId === equipment.id)
-      const queueCount = waitingQueues.filter(q => q.equipmentId === equipment.id).length
-      const myQueue = myQueues.find(q => q.equipmentId === equipment.id)
-      
-      const isAvailable = !currentUsage
-      const canStart = isAvailable && !myQueue && (!myCurrentUsage || myCurrentUsage.equipmentId === equipment.id)
-      const canQueue = !isAvailable && !myQueue && (!myCurrentUsage || myCurrentUsage.equipmentId === equipment.id)
-
-      return {
-        id: equipment.id,
-        name: equipment.name,
-        imageUrl: equipment.imageUrl,
-        category: equipment.category,
-        muscleGroup: equipment.muscleGroup,
-        createdAt: equipment.createdAt,
-        isFavorite: userId ? equipment.favorites.length > 0 : false,
-        // 상태 정보
-        status: {
-          isAvailable,
-          currentUser: currentUsage ? currentUsage.user.name : null,
-          currentUserStartedAt: currentUsage ? currentUsage.startedAt : null,
-          waitingCount: queueCount,
-          myQueuePosition: myQueue ? myQueue.queuePosition : null,
-          myQueueStatus: myQueue ? myQueue.status : null,
-          canStart: userId ? canStart : false,
-          canQueue: userId ? canQueue : false
-        }
-      }
-    })
+    let response = equipmentList.map(equipment => ({
+      id: equipment.id,
+      name: equipment.name,
+      imageUrl: equipment.imageUrl,
+      category: equipment.category,
+      muscleGroup: equipment.muscleGroup,
+      createdAt: equipment.createdAt,
+      isFavorite: userId ? equipment.favorites.length > 0 : false,
+      status: statusMap.get(equipment.id)
+    }))
 
     // 사용 가능한 기구만 필터링 (요청 시)
     if (available_only === 'true') {
@@ -221,7 +282,48 @@ router.get('/categories', async (req, res) => {
   }
 })
 
-// 특정 기구 상세 조회
+// 🔥 실시간 상태만 조회하는 경량 API 추가
+router.get('/status', async (req, res) => {
+  try {
+    const { equipmentIds } = req.query // 쉼표로 구분된 ID 목록
+    const header = req.headers.authorization || ''
+    const token = header.startsWith('Bearer ') ? header.slice(7) : null
+    let userId = null
+
+    if (token) {
+      try {
+        const payload = jwt.verify(token, process.env.JWT_SECRET)
+        userId = payload.id
+      } catch (e) {
+        // 토큰이 유효하지 않아도 상태 조회는 가능
+      }
+    }
+
+    if (!equipmentIds) {
+      return res.status(400).json({ error: 'equipmentIds 파라미터가 필요합니다' })
+    }
+
+    const ids = equipmentIds.split(',').map(id => parseInt(id)).filter(id => !isNaN(id))
+    if (ids.length === 0) {
+      return res.status(400).json({ error: '유효한 equipmentIds가 필요합니다' })
+    }
+
+    const statusMap = await getEquipmentStatusInfo(ids, userId)
+    
+    // Map을 Object로 변환
+    const statusObject = {}
+    statusMap.forEach((status, equipmentId) => {
+      statusObject[equipmentId] = status
+    })
+
+    res.json(statusObject)
+  } catch (error) {
+    console.error('기구 상태 조회 오류:', error)
+    res.status(500).json({ error: '기구 상태를 불러올 수 없습니다' })
+  }
+})
+
+// 특정 기구 상세 조회 (실시간 상태 포함)
 router.get('/:id', async (req, res) => {
   try {
     const id = Number(req.params.id)
@@ -266,6 +368,10 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: '기구를 찾을 수 없습니다' })
     }
 
+    // 🔥 실시간 상태 정보 추가
+    const statusMap = await getEquipmentStatusInfo([id], userId)
+    const status = statusMap.get(id)
+
     // 응답 데이터 가공
     const response = {
       id: equipment.id,
@@ -276,7 +382,8 @@ router.get('/:id', async (req, res) => {
       createdAt: equipment.createdAt,
       reservations: equipment.reservations,
       isFavorite: userId ? equipment.favorites.length > 0 : false,
-      favoriteCount: equipment._count.favorites
+      favoriteCount: equipment._count.favorites,
+      status: status // 🔥 실시간 상태 정보 포함
     }
     
     res.json(response)
@@ -290,7 +397,7 @@ router.get('/:id', async (req, res) => {
 router.post('/:id/quick-start', auth(), async (req, res) => {
   try {
     const equipmentId = parseInt(req.params.id)
-    const { totalSets = 3, restMinutes = 3 } = req.body
+    const { totalSets = 3, restSeconds = 180 } = req.body
 
     // 기구 존재 확인
     const equipment = await prisma.equipment.findUnique({
@@ -350,12 +457,12 @@ router.post('/:id/quick-start', auth(), async (req, res) => {
           equipmentId,
           userId: req.user.id,
           totalSets,
-          restMinutes,
+          restSeconds,
           status: 'IN_USE',
           setStatus: 'EXERCISING',
           currentSet: 1,
           currentSetStartedAt: new Date(),
-          estimatedEndAt: new Date(Date.now() + ((totalSets * 5) + ((totalSets - 1) * restMinutes)) * 60 * 1000)
+          estimatedEndAt: new Date(Date.now() + ((totalSets * 5) + ((totalSets - 1) * (restSeconds / 60))) * 60 * 1000)
         }
       })
 
@@ -374,7 +481,7 @@ router.post('/:id/quick-start', auth(), async (req, res) => {
       message: `${equipment.name} 사용을 시작했습니다`,
       equipmentName: equipment.name,
       totalSets,
-      restMinutes,
+      restSeconds,
       usageId: usage.id
     })
   } catch (error) {
