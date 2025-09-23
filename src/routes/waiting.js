@@ -10,7 +10,12 @@ const prisma = new PrismaClient()
 // ====== 입력 검증 ======
 const startUsingSchema = z.object({
   totalSets: z.number().int().min(1).max(20).default(3),
-  restMinutes: z.number().int().min(0).max(10).default(3),
+  restSeconds: z.number().int().min(0).max(600).default(180), // 0 ~ 600초(0~10분), 기본 3분
+})
+
+// 휴식시간 조절 스키마 추가
+const adjustRestSchema = z.object({
+  restSeconds: z.number().int().min(0).max(600), // 0~600초
 })
 
 // ====== 공통 유틸/헬퍼 ======
@@ -75,7 +80,7 @@ async function notifyNextUser(equipmentId) {
 }
 
 // ====== ETA 계산(정밀) - totalSets 기준 ======
-const AVG_SET_MIN = 5 // 기본 세트 시간(분), 필요 시 장비별 통계로 교체
+const AVG_SET_MIN = 5 // 세트 당 평균 시간(분)
 
 function msLeft(now, since, total) {
   if (!since) return total
@@ -85,7 +90,7 @@ function msLeft(now, since, total) {
 function estimateCurrentUsageMinutes(usage) {
   const now = Date.now()
   const setMs = AVG_SET_MIN * 60 * 1000
-  const restMs = (usage.restMinutes || 0) * 60 * 1000
+  const restMs = (usage.restSeconds || 0) * 1000
   const remainingSets = Math.max(0, usage.totalSets - usage.currentSet)
 
   if (usage.setStatus === 'EXERCISING') {
@@ -116,6 +121,8 @@ function buildQueueETAs(currentLeftMin, queue, perPersonAvg = 15, grace = 5) {
 // ========================
 // 🏋 핵심 운동 관리 API
 // ========================
+
+//기구 사용 시작 API
 router.post('/start-using/:equipmentId', auth(), async (req, res) => {
   try {
     const equipmentId = toInt(req.params.equipmentId)
@@ -123,7 +130,7 @@ router.post('/start-using/:equipmentId', auth(), async (req, res) => {
 
     const parse = startUsingSchema.safeParse(req.body)
     if (!parse.success) return res.status(400).json({ error: '입력 형식 오류', details: parse.error.issues })
-    const { totalSets, restMinutes } = parse.data
+    const { totalSets, restSeconds } = parse.data
 
     const equipment = await prisma.equipment.findUnique({ where: { id: equipmentId } })
     if (!equipment) return res.status(404).json({ error: '기구 없음' })
@@ -157,14 +164,14 @@ router.post('/start-using/:equipmentId', auth(), async (req, res) => {
           userId: req.user.id,
           totalSets,
           currentSet: 1,
-          restMinutes,
+          restSeconds,
           status: 'IN_USE',
           setStatus: 'EXERCISING',
           currentSetStartedAt: new Date(),
           estimatedEndAt:
             totalSets === 1
               ? new Date(Date.now() + 10 * 60 * 1000)
-              : new Date(Date.now() + ((totalSets * 5) + ((totalSets - 1) * restMinutes)) * 60 * 1000),
+              : new Date(Date.now() + ((totalSets * 5 * 60) + ((totalSets - 1) * restSeconds)) * 1000),
         },
         include: { equipment: true, user: { select: { name: true, email: true } } },
       })
@@ -183,7 +190,7 @@ router.post('/start-using/:equipmentId', auth(), async (req, res) => {
       totalSets: usage.totalSets,
       currentSet: usage.currentSet,
       setStatus: usage.setStatus,
-      restMinutes: usage.restMinutes,
+      restSeconds: usage.restSeconds,
       startedAt: usage.startedAt,
       currentSetStartedAt: usage.currentSetStartedAt,
       estimatedEndAt: usage.estimatedEndAt,
@@ -195,6 +202,7 @@ router.post('/start-using/:equipmentId', auth(), async (req, res) => {
   }
 })
 
+//세트 완료 API
 router.post('/complete-set/:equipmentId', auth(), async (req, res) => {
   try {
     const equipmentId = toInt(req.params.equipmentId)
@@ -217,10 +225,21 @@ router.post('/complete-set/:equipmentId', auth(), async (req, res) => {
       where: { id: usage.id }, data: { setStatus: 'RESTING', restStartedAt: new Date() }
     })
 
+    const restMinutes = Math.floor(usage.restSeconds / 60)
+    const restSecondsOnly = usage.restSeconds % 60
+    let restMessage = ''
+    if (restMinutes > 0 && restSecondsOnly > 0) {
+      restMessage = `${restMinutes}분 ${restSecondsOnly}초`
+    } else if (restMinutes > 0) {
+      restMessage = `${restMinutes}분`
+    } else {
+      restMessage = `${restSecondsOnly}초`
+    }
+
     sendNotification(req.user.id, {
       type: 'REST_STARTED',
       title: '휴식 시작',
-      message: `${usage.currentSet}/${usage.totalSets} 세트 완료. ${usage.restMinutes}분 휴식`,
+      message: `${usage.currentSet}/${usage.totalSets} 세트 완료. ${usage.restMessage} 휴식`,
       equipmentId
     })
 
@@ -239,7 +258,7 @@ router.post('/complete-set/:equipmentId', auth(), async (req, res) => {
             equipmentId
           })
         }
-      }, usage.restMinutes * 60 * 1000)
+      }, usage.restSeconds * 1000)
     }
 
     res.json({ message: `${usage.currentSet}/${usage.totalSets} 세트 완료`, setStatus: 'RESTING' })
@@ -249,6 +268,64 @@ router.post('/complete-set/:equipmentId', auth(), async (req, res) => {
   }
 })
 
+// ====== 휴식시간 조절 API 추가 ======
+router.post('/adjust-rest/:equipmentId', auth(), async (req, res) => {
+  try {
+    const equipmentId = toInt(req.params.equipmentId)
+    const parse = adjustRestSchema.safeParse(req.body)
+    if (!parse.success) return res.status(400).json({ error: '입력 형식 오류', details: parse.error.issues })
+    
+    const { restSeconds } = parse.data
+    
+    const usage = await prisma.equipmentUsage.findFirst({
+      where: { equipmentId, userId: req.user.id, status: 'IN_USE' }, 
+      include: { equipment: true }
+    })
+    if (!usage) return res.status(404).json({ error: '사용 중 아님' })
+    
+    // 운동 중이거나 휴식 중일 때만 조절 가능
+    if (!['EXERCISING', 'RESTING'].includes(usage.setStatus)) {
+      return res.status(400).json({ error: '휴식시간 조절 불가능한 상태', currentStatus: usage.setStatus })
+    }
+
+    // 휴식시간 업데이트
+    await prisma.equipmentUsage.update({
+      where: { id: usage.id },
+      data: { restSeconds }
+    })
+
+    const restMinutes = Math.floor(restSeconds / 60)
+    const restSecondsOnly = restSeconds % 60
+    let restMessage = ''
+    if (restMinutes > 0 && restSecondsOnly > 0) {
+      restMessage = `${restMinutes}분 ${restSecondsOnly}초`
+    } else if (restMinutes > 0) {
+      restMessage = `${restMinutes}분`
+    } else {
+      restMessage = `${restSecondsOnly}초`
+    }
+
+    sendNotification(req.user.id, {
+      type: 'REST_TIME_ADJUSTED',
+      title: '휴식시간 변경',
+      message: `휴식시간이 ${restMessage}로 변경되었습니다`,
+      equipmentId,
+      restSeconds
+    })
+
+    res.json({ 
+      message: `휴식시간이 ${restMessage}로 변경되었습니다`,
+      restSeconds,
+      equipmentName: usage.equipment.name
+    })
+  } catch (e) {
+    console.error('adjust-rest error:', e)
+    res.status(500).json({ error: '휴식시간 조절 실패' })
+  }
+})
+
+
+//휴식 스킵 API
 router.post('/skip-rest/:equipmentId', auth(), async (req, res) => {
   try {
     const equipmentId = toInt(req.params.equipmentId)
@@ -277,6 +354,7 @@ router.post('/skip-rest/:equipmentId', auth(), async (req, res) => {
   }
 })
 
+// 운동 중단 API
 router.post('/stop-exercise/:equipmentId', auth(), async (req, res) => {
   try {
     const equipmentId = toInt(req.params.equipmentId)
@@ -303,6 +381,7 @@ router.post('/stop-exercise/:equipmentId', auth(), async (req, res) => {
   }
 })
 
+//운동 상태 조회 API
 router.get('/exercise-status/:equipmentId', auth(), async (req, res) => {
   try {
     const equipmentId = toInt(req.params.equipmentId)
@@ -315,7 +394,7 @@ router.get('/exercise-status/:equipmentId', auth(), async (req, res) => {
     let restTimeLeft = 0
     if (usage.setStatus === 'RESTING' && usage.restStartedAt) {
       const restElapsed = Date.now() - usage.restStartedAt.getTime()
-      const totalRestMs = usage.restMinutes * 60 * 1000
+      const totalRestMs = usage.restSeconds * 1000
       restTimeLeft = Math.max(0, totalRestMs - restElapsed)
     }
 
@@ -328,7 +407,7 @@ router.get('/exercise-status/:equipmentId', auth(), async (req, res) => {
       totalSets: usage.totalSets,
       currentSet: usage.currentSet,
       setStatus: usage.setStatus,
-      restMinutes: usage.restMinutes,
+      restSeconds: usage.restSeconds,
       restTimeLeftSec: Math.ceil(restTimeLeft / 1000),
       currentSetElapsedSec: Math.floor(currentSetElapsed / 1000),
       etaMinutes,
@@ -407,6 +486,7 @@ router.delete('/queue/:queueId', auth(), async (req, res) => {
   }
 })
 
+//기구 상태 조회 API
 router.get('/status/:equipmentId', async (req, res) => {
   try {
     const equipmentId = toInt(req.params.equipmentId)
@@ -437,7 +517,7 @@ router.get('/status/:equipmentId', async (req, res) => {
         totalSets: currentUsage.totalSets,
         currentSet: currentUsage.currentSet,
         setStatus: currentUsage.setStatus,
-        restMinutes: currentUsage.restMinutes,
+        restSeconds: currentUsage.restSeconds,
         progress: Math.round((currentUsage.currentSet / currentUsage.totalSets) * 100),
         estimatedEndAt: currentUsage.estimatedEndAt,
         // (선택) 현재 사용자 잔여 ETA
@@ -450,7 +530,6 @@ router.get('/status/:equipmentId', async (req, res) => {
         status: q.status,
         createdAt: q.createdAt,
         notifiedAt: q.notifiedAt,
-        // 네가 쓰던 키 이름 유지
         estimatedWaitMinutes: etas[i] || 0,
       })),
       totalWaiting: queue.length,

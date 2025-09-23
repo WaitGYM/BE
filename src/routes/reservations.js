@@ -9,7 +9,7 @@ const resvSchema = z.object({
   startAt: z.string().datetime(),
   endAt: z.string().datetime(),
   sets: z.number().int().min(1).max(20).default(1),
-  restMinutes: z.number().int().min(1).max(10).default(3)
+  restSeconds: z.number().int().min(0).max(600).default(180) // 0 ~ 600초(0 ~ 10분), 기본 3분
 }).refine(d => new Date(d.endAt) > new Date(d.startAt), { message: 'endAt > startAt' })
 
 async function hasOverlap(equipmentId, startAt, endAt, excludeId) {
@@ -29,11 +29,11 @@ router.post('/', auth(), async (req, res) => {
     ...req.body,
     equipmentId: Number(req.body.equipmentId),
     sets: req.body.sets ? Number(req.body.sets) : 1,
-    restMinutes: req.body.restMinutes ? Number(req.body.restMinutes) : 3
+    restSeconds: req.body.restSeconds ? Number(req.body.restSeconds) : 180
   })
   if (!parse.success) return res.status(400).json({ error: '입력 형식 오류', details: parse.error.issues })
   
-  const { equipmentId, startAt, endAt, sets, restMinutes } = parse.data
+  const { equipmentId, startAt, endAt, sets, restSeconds } = parse.data
 
   const s = new Date(startAt); const e = new Date(endAt)
   if (await hasOverlap(equipmentId, s, e)) return res.status(409).json({ error: '시간 중복' })
@@ -45,7 +45,7 @@ router.post('/', auth(), async (req, res) => {
       startAt: s, 
       endAt: e,
       sets,
-      restMinutes
+      restSeconds
     },
     include: { equipment: true }
   })
@@ -95,7 +95,7 @@ router.put('/:id', auth(), async (req, res) => {
     ...req.body,
     equipmentId: req.body.equipmentId ? Number(req.body.equipmentId) : undefined,
     sets: req.body.sets ? Number(req.body.sets) : undefined,
-    restMinutes: req.body.restMinutes ? Number(req.body.restMinutes) : undefined
+    restSeconds: req.body.restSeconds ? Number(req.body.restSeconds) : undefined
   })
   if (!parse.success) return res.status(400).json({ error: '입력 형식 오류', details: parse.error.issues })
   
@@ -108,7 +108,7 @@ router.put('/:id', auth(), async (req, res) => {
     startAt: parse.data.startAt ? new Date(parse.data.startAt) : prev.startAt,
     endAt:   parse.data.endAt   ? new Date(parse.data.endAt)   : prev.endAt,
     sets: parse.data.sets ?? prev.sets,
-    restMinutes: parse.data.restMinutes ?? prev.restMinutes
+    restSeconds: parse.data.restSeconds ?? prev.restSeconds
   }
   
   if (await hasOverlap(nextData.equipmentId, nextData.startAt, nextData.endAt, id)) {
@@ -135,14 +135,14 @@ router.delete('/:id', auth(), async (req, res) => {
 
 /**
  * 예약 가능 시간 확인
- * GET /api/reservations/availability?equipmentId=1&date=2025-08-29&open=06:00&close=23:00&slotMinutes=30
+ * GET /api/reservations/availability?equipmentId=1&date=2025-08-29&open=06:00&close=23:00&slotSeconds=30
  */
 router.get('/availability', async (req, res) => {
   const equipmentId = Number(req.query.equipmentId)
   const date = req.query.date // YYYY-MM-DD
   const open = req.query.open || '09:00'
   const close = req.query.close || '18:00'
-  const slotMinutes = Number(req.query.slotMinutes || 30)
+  const slotSeconds = Number(req.query.slotSeconds || 30)
   if (!equipmentId || !date) return res.status(400).json({ error: 'equipmentId, date 필요' })
 
   // Note: Timezone handling kept simple for demo; adjust in prod as needed.
@@ -172,14 +172,14 @@ router.get('/availability', async (req, res) => {
   res.json({ 
     equipmentId, 
     date, 
-    slotMinutes, 
+    slotSeconds, 
     slots,
     existingReservations: reservations.map(r => ({
       id: r.id,
       startAt: r.startAt,
       endAt: r.endAt,
       sets: r.sets,
-      restMinutes: r.restMinutes,
+      restSeconds: r.restSeconds,
       userName: r.user.name
     }))
   })
@@ -218,7 +218,7 @@ router.get('/equipment/:equipmentId', async (req, res) => {
       startAt: r.startAt,
       endAt: r.endAt,
       sets: r.sets,
-      restMinutes: r.restMinutes,
+      restSeconds: r.restSeconds,
       user: r.user,
       status: r.status
     }))
