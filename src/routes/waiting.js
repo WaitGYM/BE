@@ -1,137 +1,293 @@
-// src/routes/waiting.js
+// src/routes/waiting.js - 실시간 ETA와 WebSocket이 통합된 최종 버전
+
 const router = require('express').Router()
 const { PrismaClient } = require('@prisma/client')
 const { auth } = require('../middleware/auth')
-const { sendNotification } = require('../websocket')
+const { 
+  sendNotification, 
+  broadcastETAUpdate, 
+  broadcastEquipmentStatusChange 
+} = require('../websocket')
 const { z } = require('zod')
 
 const prisma = new PrismaClient()
 
-// ====== 입력 검증 ======
-const startUsingSchema = z.object({
-  totalSets: z.number().int().min(1).max(20).default(3),
-  restSeconds: z.number().int().min(0).max(600).default(180), // 0 ~ 600초(0~10분), 기본 3분
-})
+// ====== 스팸 방지 시스템 ======
+const userUpdateLimiter = new Map()
+const RATE_LIMIT = {
+  WINDOW_MS: 60 * 1000,
+  MAX_REQUESTS: 3,
+  COOLDOWN_MS: 10 * 1000
+}
 
-// 휴식시간 조절 스키마 추가
-const adjustRestSchema = z.object({
-  restSeconds: z.number().int().min(0).max(600), // 0~600초
-})
-
-// ====== 공통 유틸/헬퍼 ======
-const toInt = (v) => (Number.isFinite(Number(v)) ? Number(v) : NaN)
-
-async function reorderQueue(equipmentId) {
-  const rows = await prisma.waitingQueue.findMany({
-    where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } },
-    orderBy: { createdAt: 'asc' },
-  })
-  for (let i = 0; i < rows.length; i++) {
-    if (rows[i].queuePosition !== i + 1) {
-      await prisma.waitingQueue.update({
-        where: { id: rows[i].id },
-        data: { queuePosition: i + 1 },
-      })
+function checkRateLimit(userId) {
+  const now = Date.now()
+  const userLimit = userUpdateLimiter.get(userId)
+  
+  if (!userLimit) {
+    userUpdateLimiter.set(userId, { lastUpdate: now, requestCount: 1 })
+    return { allowed: true }
+  }
+  
+  if (now - userLimit.lastUpdate > RATE_LIMIT.WINDOW_MS) {
+    userUpdateLimiter.set(userId, { lastUpdate: now, requestCount: 1 })
+    return { allowed: true }
+  }
+  
+  if (now - userLimit.lastUpdate < RATE_LIMIT.COOLDOWN_MS) {
+    return { 
+      allowed: false, 
+      remainingMs: RATE_LIMIT.COOLDOWN_MS - (now - userLimit.lastUpdate),
+      reason: 'cooldown'
     }
   }
-  return rows.length
-}
-
-async function notifyNextUser(equipmentId) {
-  const next = await prisma.waitingQueue.findFirst({
-    where: { equipmentId, status: 'WAITING' },
-    orderBy: { queuePosition: 'asc' },
-    include: { user: true, equipment: true },
-  })
-  if (!next) return false
-
-  await prisma.waitingQueue.update({
-    where: { id: next.id },
-    data: { status: 'NOTIFIED', notifiedAt: new Date() },
-  })
-
-  sendNotification(next.userId, {
-    type: 'EQUIPMENT_AVAILABLE',
-    title: '기구 사용 가능',
-    message: `${next.equipment.name}을 사용할 차례입니다. 5분 내 시작해주세요`,
-    equipmentId,
-    equipmentName: next.equipment.name,
-    queueId: next.id,
-    graceMinutes: 5,
-  })
-
-  // 5분 유예 뒤 자동 만료
-  setTimeout(async () => {
-    const fresh = await prisma.waitingQueue.findUnique({ where: { id: next.id } })
-    if (fresh && fresh.status === 'NOTIFIED') {
-      await prisma.waitingQueue.update({ where: { id: next.id }, data: { status: 'EXPIRED' } })
-      sendNotification(next.userId, {
-        type: 'QUEUE_EXPIRED',
-        title: '대기 만료',
-        message: '시간 초과로 대기에서 제외되었습니다',
-        equipmentId,
-      })
-      await reorderQueue(equipmentId)
-      await notifyNextUser(equipmentId)
+  
+  if (userLimit.requestCount >= RATE_LIMIT.MAX_REQUESTS) {
+    return { 
+      allowed: false, 
+      remainingMs: RATE_LIMIT.WINDOW_MS - (now - userLimit.lastUpdate),
+      reason: 'rate_limit'
     }
-  }, 5 * 60 * 1000)
-
-  return true
+  }
+  
+  userLimit.requestCount++
+  userLimit.lastUpdate = now
+  return { allowed: true }
 }
 
-// ====== ETA 계산(정밀) - totalSets 기준 ======
-const AVG_SET_MIN = 5 // 세트 당 평균 시간(분)
+// ====== ETA 계산 ======
+const AVG_SET_MIN = 3
+const SETUP_CLEANUP_MIN = 1
 
-function msLeft(now, since, total) {
-  if (!since) return total
-  const elapsed = now - since.getTime()
-  return Math.max(0, total - elapsed)
-}
-function estimateCurrentUsageMinutes(usage) {
+function calculateRealTimeETA(usage) {
+  if (!usage || usage.status !== 'IN_USE') return 0
+  
   const now = Date.now()
   const setMs = AVG_SET_MIN * 60 * 1000
   const restMs = (usage.restSeconds || 0) * 1000
-  const remainingSets = Math.max(0, usage.totalSets - usage.currentSet)
-
+  const remainingSets = Math.max(0, usage.totalSets - usage.currentSet + 1)
+  
   if (usage.setStatus === 'EXERCISING') {
-    const thisSetLeft = msLeft(now, usage.currentSetStartedAt, setMs)
-    if (remainingSets === 0) return Math.ceil(thisSetLeft / 60000)
-    const tail = (remainingSets - 1) * (setMs + restMs) + setMs
-    return Math.ceil((thisSetLeft + tail) / 60000)
+    const currentSetElapsed = usage.currentSetStartedAt ? 
+      now - usage.currentSetStartedAt.getTime() : 0
+    const currentSetRemaining = Math.max(0, setMs - currentSetElapsed)
+    const futureWorkTime = (remainingSets - 1) * setMs
+    const futureRestTime = (remainingSets - 1) * restMs
+    
+    return Math.ceil((currentSetRemaining + futureWorkTime + futureRestTime) / 60000)
   }
+  
   if (usage.setStatus === 'RESTING') {
-    const thisRestLeft = msLeft(now, usage.restStartedAt, restMs)
-    const k = remainingSets + 1 // 휴식 뒤 시작할 세트 포함
-    const work = k * setMs
-    const rests = (k - 1) * restMs
-    return Math.ceil((thisRestLeft + work + rests) / 60000)
+    const restElapsed = usage.restStartedAt ? 
+      now - usage.restStartedAt.getTime() : 0
+    const restRemaining = Math.max(0, restMs - restElapsed)
+    const futureWorkTime = remainingSets * setMs
+    const futureRestTime = (remainingSets - 1) * restMs
+    
+    return Math.ceil((restRemaining + futureWorkTime + futureRestTime) / 60000)
   }
+  
   return 0
 }
-function buildQueueETAs(currentLeftMin, queue, perPersonAvg = 15, grace = 5) {
+
+function buildQueueETAs(currentETA, queue) {
   const etas = []
-  let acc = currentLeftMin
+  let accumulator = currentETA + SETUP_CLEANUP_MIN
+  
   for (let i = 0; i < queue.length; i++) {
-    if (i === 0) etas.push(acc + grace)
-    else { acc = etas[i - 1] + perPersonAvg; etas.push(acc) }
+    etas.push(accumulator)
+    accumulator += AVG_SET_MIN * 3 + 2 + SETUP_CLEANUP_MIN
   }
+  
   return etas
 }
 
-// ========================
-// 🏋 핵심 운동 관리 API
-// ========================
+// ====== 자동 업데이트 시스템 ======
+let autoUpdateIntervals = new Map()
 
-//기구 사용 시작 API
+async function startAutoUpdate(equipmentId) {
+  if (autoUpdateIntervals.has(equipmentId)) return
+  
+  const intervalId = setInterval(async () => {
+    try {
+      const currentUsage = await prisma.equipmentUsage.findFirst({
+        where: { equipmentId, status: 'IN_USE' },
+        include: { user: { select: { name: true } }, equipment: true }
+      })
+      
+      if (!currentUsage) {
+        stopAutoUpdate(equipmentId)
+        return
+      }
+      
+      const queue = await prisma.waitingQueue.findMany({
+        where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } },
+        orderBy: { queuePosition: 'asc' },
+        include: { user: { select: { name: true } } }
+      })
+      
+      if (queue.length === 0) {
+        stopAutoUpdate(equipmentId)
+        return
+      }
+      
+      const currentETA = calculateRealTimeETA(currentUsage)
+      const queueETAs = buildQueueETAs(currentETA, queue)
+      
+      // 🔥 WebSocket으로 실시간 브로드캐스트
+      const updateData = {
+        equipmentId,
+        equipmentName: currentUsage.equipment.name,
+        currentUsage: {
+          userName: currentUsage.user.name,
+          totalSets: currentUsage.totalSets,
+          currentSet: currentUsage.currentSet,
+          setStatus: currentUsage.setStatus,
+          estimatedMinutesLeft: currentETA,
+          progress: Math.round((currentUsage.currentSet / currentUsage.totalSets) * 100)
+        },
+        waitingQueue: queue.map((q, index) => ({
+          id: q.id,
+          position: q.queuePosition,
+          userName: q.user.name,
+          estimatedWaitMinutes: queueETAs[index]
+        })),
+        lastUpdated: new Date(),
+        isAutoUpdate: true
+      }
+      
+      // 기구 구독자들에게 브로드캐스트
+      broadcastETAUpdate(equipmentId, updateData)
+      
+      // 개별 사용자에게도 알림
+      queue.forEach((q, index) => {
+        sendNotification(q.userId, {
+          type: 'AUTO_ETA_UPDATE',
+          title: 'ETA 자동 업데이트',
+          message: `${currentUsage.equipment.name} 예상 대기시간: ${queueETAs[index]}분`,
+          equipmentId,
+          estimatedWaitMinutes: queueETAs[index],
+          queuePosition: q.queuePosition
+        })
+      })
+      
+    } catch (error) {
+      console.error('자동 ETA 업데이트 오류:', error)
+      stopAutoUpdate(equipmentId)
+    }
+  }, 2 * 60 * 1000) // 2분마다
+  
+  autoUpdateIntervals.set(equipmentId, intervalId)
+  console.log(`자동 ETA 업데이트 시작: 기구 ${equipmentId}`)
+}
+
+function stopAutoUpdate(equipmentId) {
+  const intervalId = autoUpdateIntervals.get(equipmentId)
+  if (intervalId) {
+    clearInterval(intervalId)
+    autoUpdateIntervals.delete(equipmentId)
+    console.log(`자동 ETA 업데이트 중지: 기구 ${equipmentId}`)
+  }
+}
+
+// ====== API 엔드포인트들 ======
+
+// 🔥 ETA 수동 업데이트 API
+router.post('/update-eta/:equipmentId', auth(), async (req, res) => {
+  try {
+    const equipmentId = parseInt(req.params.equipmentId)
+    const userId = req.user.id
+    
+    // 스팸 방지 체크
+    const rateLimitCheck = checkRateLimit(userId)
+    if (!rateLimitCheck.allowed) {
+      const remainingSec = Math.ceil(rateLimitCheck.remainingMs / 1000)
+      return res.status(429).json({ 
+        error: rateLimitCheck.reason === 'cooldown' ? '너무 자주 업데이트했습니다' : '업데이트 횟수 초과',
+        remainingSeconds: remainingSec,
+        message: `${remainingSec}초 후 다시 시도해주세요`
+      })
+    }
+    
+    const equipment = await prisma.equipment.findUnique({
+      where: { id: equipmentId }
+    })
+    if (!equipment) {
+      return res.status(404).json({ error: '기구를 찾을 수 없습니다' })
+    }
+    
+    const currentUsage = await prisma.equipmentUsage.findFirst({
+      where: { equipmentId, status: 'IN_USE' },
+      include: { user: { select: { name: true } } }
+    })
+    
+    const queue = await prisma.waitingQueue.findMany({
+      where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } },
+      orderBy: { queuePosition: 'asc' },
+      include: { user: { select: { name: true } } }
+    })
+    
+    const currentETA = currentUsage ? calculateRealTimeETA(currentUsage) : 0
+    const queueETAs = buildQueueETAs(currentETA, queue)
+    const updateTime = new Date()
+    
+    // 🔥 실시간 브로드캐스트
+    const updateData = {
+      equipmentId,
+      equipmentName: equipment.name,
+      updatedAt: updateTime,
+      updatedBy: userId,
+      currentUsage: currentUsage ? {
+        userName: currentUsage.user.name,
+        totalSets: currentUsage.totalSets,
+        currentSet: currentUsage.currentSet,
+        setStatus: currentUsage.setStatus,
+        estimatedMinutesLeft: currentETA,
+        progress: Math.round((currentUsage.currentSet / currentUsage.totalSets) * 100)
+      } : null,
+      waitingQueue: queue.map((q, index) => ({
+        id: q.id,
+        position: q.queuePosition,
+        userName: q.user.name,
+        estimatedWaitMinutes: queueETAs[index],
+        isYou: q.userId === userId
+      })),
+      totalWaiting: queue.length,
+      isManualUpdate: true
+    }
+    
+    // WebSocket 브로드캐스트
+    broadcastETAUpdate(equipmentId, updateData)
+    
+    // 대기 중인 모든 사용자에게 개별 알림
+    queue.forEach((q, index) => {
+      sendNotification(q.userId, {
+        type: 'ETA_UPDATED',
+        title: 'ETA 업데이트',
+        message: `${equipment.name} 예상 대기시간: ${queueETAs[index]}분`,
+        equipmentId,
+        equipmentName: equipment.name,
+        estimatedWaitMinutes: queueETAs[index],
+        queuePosition: q.queuePosition,
+        updatedAt: updateTime,
+        updatedBy: q.userId === userId ? '나' : '다른 사용자'
+      })
+    })
+    
+    res.json(updateData)
+    
+  } catch (error) {
+    console.error('ETA 업데이트 오류:', error)
+    res.status(500).json({ error: 'ETA 업데이트에 실패했습니다' })
+  }
+})
+
+// 🔥 기구 사용 시작 API (자동 업데이트 포함)
 router.post('/start-using/:equipmentId', auth(), async (req, res) => {
   try {
-    const equipmentId = toInt(req.params.equipmentId)
-    if (!Number.isFinite(equipmentId) || equipmentId < 1) return res.status(400).json({ error: '올바른 기구 ID 필요' })
-
-    const parse = startUsingSchema.safeParse(req.body)
-    if (!parse.success) return res.status(400).json({ error: '입력 형식 오류', details: parse.error.issues })
-    const { totalSets, restSeconds } = parse.data
-
+    const equipmentId = parseInt(req.params.equipmentId)
+    const { totalSets = 3, restSeconds = 180 } = req.body
+    
     const equipment = await prisma.equipment.findUnique({ where: { id: equipmentId } })
     if (!equipment) return res.status(404).json({ error: '기구 없음' })
 
@@ -139,22 +295,35 @@ router.post('/start-using/:equipmentId', auth(), async (req, res) => {
       where: { equipmentId, status: 'IN_USE' }, include: { user: true }
     })
     if (currentUsage) {
-      return res.status(409).json({ error: '이미 사용 중', currentUser: currentUsage.user.name, since: currentUsage.startedAt })
+      return res.status(409).json({ 
+        error: '이미 사용 중', 
+        currentUser: currentUsage.user.name, 
+        since: currentUsage.startedAt 
+      })
     }
 
     const myUsage = await prisma.equipmentUsage.findFirst({
-      where: { userId: req.user.id, status: 'IN_USE' }, include: { equipment: true }
+      where: { userId: req.user.id, status: 'IN_USE' }, 
+      include: { equipment: true }
     })
-    if (myUsage) return res.status(409).json({ error: '다른 기구 사용 중', currentEquipment: myUsage.equipment.name, equipmentId: myUsage.equipmentId })
+    if (myUsage) {
+      return res.status(409).json({ 
+        error: '다른 기구 사용 중', 
+        currentEquipment: myUsage.equipment.name, 
+        equipmentId: myUsage.equipmentId 
+      })
+    }
 
     const firstInQueue = await prisma.waitingQueue.findFirst({
-      where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } }, orderBy: { queuePosition: 'asc' }
+      where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } }, 
+      orderBy: { queuePosition: 'asc' }
     })
+    
     if (firstInQueue && firstInQueue.userId !== req.user.id) {
-      const mine = await prisma.waitingQueue.findFirst({
-        where: { equipmentId, userId: req.user.id, status: { in: ['WAITING', 'NOTIFIED'] } }
+      return res.status(403).json({ 
+        error: '대기 순서가 아님', 
+        firstPosition: firstInQueue.queuePosition 
       })
-      return res.status(403).json({ error: '대기 순서가 아님', yourPosition: mine?.queuePosition ?? null, firstPosition: firstInQueue.queuePosition })
     }
 
     const usage = await prisma.$transaction(async (tx) => {
@@ -168,20 +337,32 @@ router.post('/start-using/:equipmentId', auth(), async (req, res) => {
           status: 'IN_USE',
           setStatus: 'EXERCISING',
           currentSetStartedAt: new Date(),
-          estimatedEndAt:
-            totalSets === 1
-              ? new Date(Date.now() + 10 * 60 * 1000)
-              : new Date(Date.now() + ((totalSets * 5 * 60) + ((totalSets - 1) * restSeconds)) * 1000),
+          estimatedEndAt: new Date(Date.now() + ((totalSets * 5 * 60) + ((totalSets - 1) * restSeconds)) * 1000),
         },
-        include: { equipment: true, user: { select: { name: true, email: true } } },
+        include: { equipment: true, user: { select: { name: true } } }
       })
+      
       if (firstInQueue && firstInQueue.userId === req.user.id) {
-        await tx.waitingQueue.update({ where: { id: firstInQueue.id }, data: { status: 'COMPLETED' } })
+        await tx.waitingQueue.update({ 
+          where: { id: firstInQueue.id }, 
+          data: { status: 'COMPLETED' } 
+        })
       }
+      
       return u
     })
 
-    if (firstInQueue && firstInQueue.userId === req.user.id) setImmediate(() => reorderQueue(equipmentId))
+    // 🔥 상태 변경 브로드캐스트
+    broadcastEquipmentStatusChange(equipmentId, {
+      type: 'usage_started',
+      equipmentName: equipment.name,
+      userName: usage.user.name,
+      totalSets: usage.totalSets,
+      startedAt: usage.startedAt
+    })
+
+    // 🔥 자동 ETA 업데이트 시작
+    startAutoUpdate(equipmentId)
 
     res.status(201).json({
       id: usage.id,
@@ -192,325 +373,384 @@ router.post('/start-using/:equipmentId', auth(), async (req, res) => {
       setStatus: usage.setStatus,
       restSeconds: usage.restSeconds,
       startedAt: usage.startedAt,
-      currentSetStartedAt: usage.currentSetStartedAt,
       estimatedEndAt: usage.estimatedEndAt,
-      progress: Math.round((usage.currentSet / usage.totalSets) * 100),
+      progress: Math.round((usage.currentSet / usage.totalSets) * 100)
     })
-  } catch (e) {
-    console.error('start-using error:', e)
+    
+  } catch (error) {
+    console.error('start-using error:', error)
     res.status(500).json({ error: '기구 사용 시작 실패' })
   }
 })
 
-//세트 완료 API
+// 🔥 세트 완료 API (실시간 업데이트 포함)
 router.post('/complete-set/:equipmentId', auth(), async (req, res) => {
   try {
-    const equipmentId = toInt(req.params.equipmentId)
+    const equipmentId = parseInt(req.params.equipmentId)
     const usage = await prisma.equipmentUsage.findFirst({
-      where: { equipmentId, userId: req.user.id, status: 'IN_USE' }, include: { equipment: true }
+      where: { equipmentId, userId: req.user.id, status: 'IN_USE' }, 
+      include: { equipment: true, user: { select: { name: true } } }
     })
+    
     if (!usage) return res.status(404).json({ error: '사용 중 아님' })
-    if (usage.setStatus !== 'EXERCISING') return res.status(400).json({ error: 'EXERCISING 상태가 아님', currentStatus: usage.setStatus })
+    if (usage.setStatus !== 'EXERCISING') {
+      return res.status(400).json({ 
+        error: 'EXERCISING 상태가 아님', 
+        currentStatus: usage.setStatus 
+      })
+    }
 
     const isLastSet = usage.currentSet >= usage.totalSets
+    
     if (isLastSet) {
+      // 운동 완료
       await prisma.equipmentUsage.update({
-        where: { id: usage.id }, data: { status: 'COMPLETED', setStatus: 'COMPLETED', endedAt: new Date() }
+        where: { id: usage.id }, 
+        data: { 
+          status: 'COMPLETED', 
+          setStatus: 'COMPLETED', 
+          endedAt: new Date() 
+        }
       })
-      setImmediate(() => notifyNextUser(equipmentId).catch(console.error))
-      return res.json({ message: `전체 ${usage.totalSets}세트 완료!`, completed: true })
+      
+      // 🔥 완료 브로드캐스트
+      broadcastEquipmentStatusChange(equipmentId, {
+        type: 'usage_completed',
+        equipmentName: usage.equipment.name,
+        userName: usage.user.name,
+        totalSets: usage.totalSets,
+        completedAt: new Date()
+      })
+      
+      // 자동 업데이트 중지
+      stopAutoUpdate(equipmentId)
+      
+      // 다음 대기자 알림
+      setTimeout(() => notifyNextUser(equipmentId), 1000)
+      
+      return res.json({ 
+        message: `전체 ${usage.totalSets}세트 완료!`, 
+        completed: true 
+      })
     }
 
+    // 휴식 시작
     await prisma.equipmentUsage.update({
-      where: { id: usage.id }, data: { setStatus: 'RESTING', restStartedAt: new Date() }
+      where: { id: usage.id }, 
+      data: { 
+        setStatus: 'RESTING', 
+        restStartedAt: new Date() 
+      }
     })
 
-    const restMinutes = Math.floor(usage.restSeconds / 60)
-    const restSecondsOnly = usage.restSeconds % 60
-    let restMessage = ''
-    if (restMinutes > 0 && restSecondsOnly > 0) {
-      restMessage = `${restMinutes}분 ${restSecondsOnly}초`
-    } else if (restMinutes > 0) {
-      restMessage = `${restMinutes}분`
-    } else {
-      restMessage = `${restSecondsOnly}초`
-    }
+    // 🔥 휴식 시작 브로드캐스트
+    broadcastEquipmentStatusChange(equipmentId, {
+      type: 'rest_started',
+      equipmentName: usage.equipment.name,
+      userName: usage.user.name,
+      currentSet: usage.currentSet,
+      totalSets: usage.totalSets,
+      restSeconds: usage.restSeconds
+    })
 
+    // 휴식 알림
     sendNotification(req.user.id, {
       type: 'REST_STARTED',
       title: '휴식 시작',
-      message: `${usage.currentSet}/${usage.totalSets} 세트 완료. ${usage.restMessage} 휴식`,
-      equipmentId
+      message: `${usage.currentSet}/${usage.totalSets} 세트 완료`,
+      equipmentId,
+      restSeconds: usage.restSeconds
     })
 
-    if (usage.restMinutes > 0) {
+    // 자동 다음 세트 시작
+    if (usage.restSeconds > 0) {
       setTimeout(async () => {
-        const current = await prisma.equipmentUsage.findUnique({ where: { id: usage.id }, include: { equipment: true } })
+        const current = await prisma.equipmentUsage.findUnique({ 
+          where: { id: usage.id }, 
+          include: { equipment: true, user: { select: { name: true } } } 
+        })
+        
         if (current && current.setStatus === 'RESTING' && current.status === 'IN_USE') {
           await prisma.equipmentUsage.update({
             where: { id: usage.id },
-            data: { currentSet: current.currentSet + 1, setStatus: 'EXERCISING', currentSetStartedAt: new Date(), restStartedAt: null }
+            data: { 
+              currentSet: current.currentSet + 1, 
+              setStatus: 'EXERCISING', 
+              currentSetStartedAt: new Date(), 
+              restStartedAt: null 
+            }
           })
+          
+          // 🔥 다음 세트 시작 브로드캐스트
+          broadcastEquipmentStatusChange(equipmentId, {
+            type: 'next_set_started',
+            equipmentName: current.equipment.name,
+            userName: current.user.name,
+            currentSet: current.currentSet + 1,
+            totalSets: current.totalSets
+          })
+          
           sendNotification(req.user.id, {
             type: 'NEXT_SET_STARTED',
             title: '다음 세트',
-            message: `${current.currentSet + 1}/${usage.totalSets} 세트 시작`,
+            message: `${current.currentSet + 1}/${current.totalSets} 세트 시작`,
             equipmentId
           })
         }
       }, usage.restSeconds * 1000)
     }
 
-    res.json({ message: `${usage.currentSet}/${usage.totalSets} 세트 완료`, setStatus: 'RESTING' })
-  } catch (e) {
-    console.error('complete-set error:', e)
+    res.json({ 
+      message: `${usage.currentSet}/${usage.totalSets} 세트 완료`, 
+      setStatus: 'RESTING',
+      restSeconds: usage.restSeconds
+    })
+    
+  } catch (error) {
+    console.error('complete-set error:', error)
     res.status(500).json({ error: '세트 완료 실패' })
   }
 })
 
-// ====== 휴식시간 조절 API 추가 ======
-router.post('/adjust-rest/:equipmentId', auth(), async (req, res) => {
-  try {
-    const equipmentId = toInt(req.params.equipmentId)
-    const parse = adjustRestSchema.safeParse(req.body)
-    if (!parse.success) return res.status(400).json({ error: '입력 형식 오류', details: parse.error.issues })
-    
-    const { restSeconds } = parse.data
-    
-    const usage = await prisma.equipmentUsage.findFirst({
-      where: { equipmentId, userId: req.user.id, status: 'IN_USE' }, 
-      include: { equipment: true }
-    })
-    if (!usage) return res.status(404).json({ error: '사용 중 아님' })
-    
-    // 운동 중이거나 휴식 중일 때만 조절 가능
-    if (!['EXERCISING', 'RESTING'].includes(usage.setStatus)) {
-      return res.status(400).json({ error: '휴식시간 조절 불가능한 상태', currentStatus: usage.setStatus })
-    }
-
-    // 휴식시간 업데이트
-    await prisma.equipmentUsage.update({
-      where: { id: usage.id },
-      data: { restSeconds }
-    })
-
-    const restMinutes = Math.floor(restSeconds / 60)
-    const restSecondsOnly = restSeconds % 60
-    let restMessage = ''
-    if (restMinutes > 0 && restSecondsOnly > 0) {
-      restMessage = `${restMinutes}분 ${restSecondsOnly}초`
-    } else if (restMinutes > 0) {
-      restMessage = `${restMinutes}분`
-    } else {
-      restMessage = `${restSecondsOnly}초`
-    }
-
-    sendNotification(req.user.id, {
-      type: 'REST_TIME_ADJUSTED',
-      title: '휴식시간 변경',
-      message: `휴식시간이 ${restMessage}로 변경되었습니다`,
-      equipmentId,
-      restSeconds
-    })
-
-    res.json({ 
-      message: `휴식시간이 ${restMessage}로 변경되었습니다`,
-      restSeconds,
-      equipmentName: usage.equipment.name
-    })
-  } catch (e) {
-    console.error('adjust-rest error:', e)
-    res.status(500).json({ error: '휴식시간 조절 실패' })
-  }
-})
-
-
-//휴식 스킵 API
-router.post('/skip-rest/:equipmentId', auth(), async (req, res) => {
-  try {
-    const equipmentId = toInt(req.params.equipmentId)
-    const usage = await prisma.equipmentUsage.findFirst({
-      where: { equipmentId, userId: req.user.id, status: 'IN_USE' }, include: { equipment: true }
-    })
-    if (!usage) return res.status(404).json({ error: '사용 중 아님' })
-    if (usage.setStatus !== 'RESTING') return res.status(400).json({ error: 'RESTING 상태가 아님', currentStatus: usage.setStatus })
-    if (usage.currentSet >= usage.totalSets) return res.status(400).json({ error: '이미 모든 세트 완료' })
-
-    const updated = await prisma.equipmentUsage.update({
-      where: { id: usage.id },
-      data: { currentSet: usage.currentSet + 1, setStatus: 'EXERCISING', currentSetStartedAt: new Date(), restStartedAt: null }
-    })
-    sendNotification(req.user.id, {
-      type: 'SET_SKIPPED',
-      title: '휴식 스킵',
-      message: `${updated.currentSet}/${usage.totalSets} 세트 시작`,
-      equipmentId
-    })
-
-    res.json({ message: `${updated.currentSet}/${usage.totalSets} 세트 시작`, setStatus: 'EXERCISING' })
-  } catch (e) {
-    console.error('skip-rest error:', e)
-    res.status(500).json({ error: '휴식 스킵 실패' })
-  }
-})
-
-// 운동 중단 API
+// 🔥 운동 중단 API (실시간 업데이트 포함)
 router.post('/stop-exercise/:equipmentId', auth(), async (req, res) => {
   try {
-    const equipmentId = toInt(req.params.equipmentId)
+    const equipmentId = parseInt(req.params.equipmentId)
     const usage = await prisma.equipmentUsage.findFirst({
-      where: { equipmentId, userId: req.user.id, status: 'IN_USE' }, include: { equipment: true }
+      where: { equipmentId, userId: req.user.id, status: 'IN_USE' }, 
+      include: { equipment: true, user: { select: { name: true } } }
     })
+    
     if (!usage) return res.status(404).json({ error: '사용 중 아님' })
 
     await prisma.equipmentUsage.update({
-      where: { id: usage.id }, data: { status: 'COMPLETED', setStatus: 'STOPPED', endedAt: new Date() }
+      where: { id: usage.id }, 
+      data: { 
+        status: 'COMPLETED', 
+        setStatus: 'STOPPED', 
+        endedAt: new Date() 
+      }
     })
+    
+    // 🔥 중단 브로드캐스트
+    broadcastEquipmentStatusChange(equipmentId, {
+      type: 'usage_stopped',
+      equipmentName: usage.equipment.name,
+      userName: usage.user.name,
+      completedSets: usage.currentSet,
+      totalSets: usage.totalSets,
+      stoppedAt: new Date()
+    })
+    
     sendNotification(req.user.id, {
       type: 'EXERCISE_STOPPED',
       title: '운동 중단',
       message: `${usage.equipment.name} 운동 중단`,
       equipmentId
     })
-    setImmediate(() => notifyNextUser(equipmentId).catch(console.error))
+    
+    // 자동 업데이트 중지 및 다음 사용자 알림
+    stopAutoUpdate(equipmentId)
+    setTimeout(() => notifyNextUser(equipmentId), 1000)
 
     res.json({ message: '운동 중단 완료' })
-  } catch (e) {
-    console.error('stop-exercise error:', e)
+    
+  } catch (error) {
+    console.error('stop-exercise error:', error)
     res.status(500).json({ error: '운동 중단 실패' })
   }
 })
 
-//운동 상태 조회 API
-router.get('/exercise-status/:equipmentId', auth(), async (req, res) => {
-  try {
-    const equipmentId = toInt(req.params.equipmentId)
-    const usage = await prisma.equipmentUsage.findFirst({
-      where: { equipmentId, userId: req.user.id, status: 'IN_USE' },
-      include: { equipment: { select: { name: true } } }
-    })
-    if (!usage) return res.status(404).json({ error: '사용 중 아님' })
-
-    let restTimeLeft = 0
-    if (usage.setStatus === 'RESTING' && usage.restStartedAt) {
-      const restElapsed = Date.now() - usage.restStartedAt.getTime()
-      const totalRestMs = usage.restSeconds * 1000
-      restTimeLeft = Math.max(0, totalRestMs - restElapsed)
-    }
-
-    const currentSetElapsed = usage.currentSetStartedAt ? Date.now() - usage.currentSetStartedAt.getTime() : 0
-    const etaMinutes = estimateCurrentUsageMinutes(usage)
-
-    res.json({
-      equipmentId: usage.equipmentId,
-      equipmentName: usage.equipment.name,
-      totalSets: usage.totalSets,
-      currentSet: usage.currentSet,
-      setStatus: usage.setStatus,
-      restSeconds: usage.restSeconds,
-      restTimeLeftSec: Math.ceil(restTimeLeft / 1000),
-      currentSetElapsedSec: Math.floor(currentSetElapsed / 1000),
-      etaMinutes,
-      progress: Math.round((usage.currentSet / usage.totalSets) * 100),
-    })
-  } catch (e) {
-    console.error('exercise-status error:', e)
-    res.status(500).json({ error: '상태 조회 실패' })
-  }
-})
-
-// ====================
-// 📝 대기열 관리 API
-// ====================
+// 🔥 대기열 등록 API (실시간 업데이트 포함)
 router.post('/queue/:equipmentId', auth(), async (req, res) => {
   try {
-    const equipmentId = toInt(req.params.equipmentId)
+    const equipmentId = parseInt(req.params.equipmentId)
     const equipment = await prisma.equipment.findUnique({ where: { id: equipmentId } })
     if (!equipment) return res.status(404).json({ error: '기구 없음' })
 
     const existing = await prisma.waitingQueue.findFirst({
-      where: { equipmentId, userId: req.user.id, status: { in: ['WAITING', 'NOTIFIED'] } }
+      where: { 
+        equipmentId, 
+        userId: req.user.id, 
+        status: { in: ['WAITING', 'NOTIFIED'] } 
+      }
     })
-    if (existing) return res.status(409).json({ error: '이미 대기열 등록', queuePosition: existing.queuePosition, status: existing.status })
+    
+    if (existing) {
+      return res.status(409).json({ 
+        error: '이미 대기열 등록', 
+        queuePosition: existing.queuePosition, 
+        status: existing.status 
+      })
+    }
 
-    const myUsage = await prisma.equipmentUsage.findFirst({ where: { userId: req.user.id, status: 'IN_USE' } })
+    const myUsage = await prisma.equipmentUsage.findFirst({ 
+      where: { userId: req.user.id, status: 'IN_USE' } 
+    })
     if (myUsage) return res.status(409).json({ error: '이미 다른 기구 사용 중' })
 
     const length = await prisma.waitingQueue.count({
       where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } }
     })
+    
     const queue = await prisma.waitingQueue.create({
-      data: { equipmentId, userId: req.user.id, queuePosition: length + 1, status: 'WAITING' },
-      include: { equipment: true }
+      data: { 
+        equipmentId, 
+        userId: req.user.id, 
+        queuePosition: length + 1, 
+        status: 'WAITING' 
+      },
+      include: { equipment: true, user: { select: { name: true } } }
     })
 
-    const currentUsage = await prisma.equipmentUsage.findFirst({ where: { equipmentId, status: 'IN_USE' } })
-    if (!currentUsage && queue.queuePosition === 1) setImmediate(() => notifyNextUser(equipmentId))
+    // 🔥 대기열 등록 브로드캐스트
+    broadcastEquipmentStatusChange(equipmentId, {
+      type: 'queue_joined',
+      equipmentName: equipment.name,
+      userName: queue.user.name,
+      queuePosition: queue.queuePosition,
+      totalWaiting: length + 1
+    })
+
+    // 즉시 사용 가능한 경우 알림
+    const currentUsage = await prisma.equipmentUsage.findFirst({ 
+      where: { equipmentId, status: 'IN_USE' } 
+    })
+    
+    if (!currentUsage && queue.queuePosition === 1) {
+      setTimeout(() => notifyNextUser(equipmentId), 1000)
+    } else if (currentUsage) {
+      // 자동 업데이트 시작 (아직 시작되지 않았다면)
+      startAutoUpdate(equipmentId)
+    }
 
     res.status(201).json({
       id: queue.id,
       queuePosition: queue.queuePosition,
       equipmentId,
       equipmentName: queue.equipment.name,
-      status: queue.status
+      status: queue.status,
+      estimatedWaitMinutes: length * 15 // 간단한 예상 시간
     })
-  } catch (e) {
-    console.error('queue add error:', e)
+    
+  } catch (error) {
+    console.error('queue add error:', error)
     res.status(500).json({ error: '대기열 등록 실패' })
   }
 })
 
-router.delete('/queue/:queueId', auth(), async (req, res) => {
-  try {
-    const queueId = toInt(req.params.queueId)
-    const queue = await prisma.waitingQueue.findUnique({
-      where: { id: queueId }, include: { equipment: true }
-    })
-    if (!queue) return res.status(404).json({ error: '대기열 없음' })
-    if (queue.userId !== req.user.id) return res.status(403).json({ error: '권한 없음' })
-    if (!['WAITING', 'NOTIFIED'].includes(queue.status)) return res.status(400).json({ error: '취소 불가 상태', status: queue.status })
+// ====== 유틸리티 함수들 ======
 
-    await prisma.waitingQueue.update({ where: { id: queueId }, data: { status: 'CANCELLED' } })
-    sendNotification(req.user.id, {
-      type: 'QUEUE_CANCELLED',
-      title: '대기 취소',
-      message: `${queue.equipment.name} 대기 취소`,
-      equipmentId: queue.equipmentId
-    })
-    setImmediate(() => reorderQueue(queue.equipmentId))
-
-    res.status(204).end()
-  } catch (e) {
-    console.error('queue cancel error:', e)
-    res.status(500).json({ error: '대기열 취소 실패' })
+async function reorderQueue(equipmentId) {
+  const rows = await prisma.waitingQueue.findMany({
+    where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } },
+    orderBy: { createdAt: 'asc' },
+  })
+  
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].queuePosition !== i + 1) {
+      await prisma.waitingQueue.update({
+        where: { id: rows[i].id },
+        data: { queuePosition: i + 1 },
+      })
+    }
   }
-})
+  
+  return rows.length
+}
 
-//기구 상태 조회 API
+async function notifyNextUser(equipmentId) {
+  const next = await prisma.waitingQueue.findFirst({
+    where: { equipmentId, status: 'WAITING' },
+    orderBy: { queuePosition: 'asc' },
+    include: { user: true, equipment: true },
+  })
+  
+  if (!next) return false
+
+  await prisma.waitingQueue.update({
+    where: { id: next.id },
+    data: { status: 'NOTIFIED', notifiedAt: new Date() },
+  })
+
+  // 🔥 다음 사용자 알림 (개선된 버전)
+  sendNotification(next.userId, {
+    type: 'EQUIPMENT_AVAILABLE',
+    title: '기구 사용 가능',
+    message: `${next.equipment.name}을 사용할 차례입니다`,
+    equipmentId,
+    equipmentName: next.equipment.name,
+    queueId: next.id,
+    graceMinutes: 5,
+  })
+
+  // 🔥 대기열 변경 브로드캐스트
+  broadcastEquipmentStatusChange(equipmentId, {
+    type: 'next_user_notified',
+    equipmentName: next.equipment.name,
+    nextUserName: next.user.name,
+    queuePosition: next.queuePosition
+  })
+
+  // 5분 유예 타이머
+  setTimeout(async () => {
+    const fresh = await prisma.waitingQueue.findUnique({ where: { id: next.id } })
+    if (fresh && fresh.status === 'NOTIFIED') {
+      await prisma.waitingQueue.update({ 
+        where: { id: next.id }, 
+        data: { status: 'EXPIRED' } 
+      })
+      
+      sendNotification(next.userId, {
+        type: 'QUEUE_EXPIRED',
+        title: '대기 만료',
+        message: '시간 초과로 대기에서 제외되었습니다',
+        equipmentId,
+      })
+      
+      await reorderQueue(equipmentId)
+      await notifyNextUser(equipmentId)
+    }
+  }, 5 * 60 * 1000)
+
+  return true
+}
+
+// ====== 추가 API들 ======
+
+// 실시간 상태 조회
 router.get('/status/:equipmentId', async (req, res) => {
   try {
-    const equipmentId = toInt(req.params.equipmentId)
+    const equipmentId = parseInt(req.params.equipmentId)
     const equipment = await prisma.equipment.findUnique({ where: { id: equipmentId } })
-    if (!equipment) return res.status(404).json({ error: '기구 없음' })
+    if (!equipment) return res.status(404).json({ error: '기구를 찾을 수 없습니다' })
 
     const currentUsage = await prisma.equipmentUsage.findFirst({
       where: { equipmentId, status: 'IN_USE' },
       include: { user: { select: { name: true } } }
     })
+    
     const queue = await prisma.waitingQueue.findMany({
       where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } },
       orderBy: { queuePosition: 'asc' },
       include: { user: { select: { name: true } } }
     })
 
-    let currentLeft = 0
-    if (currentUsage) currentLeft = estimateCurrentUsageMinutes(currentUsage)
-    const etas = buildQueueETAs(currentLeft, queue, 15, 5)
+    const currentETA = currentUsage ? calculateRealTimeETA(currentUsage) : 0
+    const queueETAs = buildQueueETAs(currentETA, queue)
+
+    let setProgress = null
+    if (currentUsage && currentUsage.setStatus === 'EXERCISING' && currentUsage.currentSetStartedAt) {
+      const elapsed = Date.now() - currentUsage.currentSetStartedAt.getTime()
+      const estimatedSetTime = AVG_SET_MIN * 60 * 1000
+      setProgress = Math.min(100, Math.round((elapsed / estimatedSetTime) * 100))
+    }
 
     res.json({
       equipmentId,
       equipmentName: equipment.name,
       isAvailable: !currentUsage,
+      lastUpdated: new Date(),
       currentUser: currentUsage ? {
         name: currentUsage.user.name,
         startedAt: currentUsage.startedAt,
@@ -519,9 +759,10 @@ router.get('/status/:equipmentId', async (req, res) => {
         setStatus: currentUsage.setStatus,
         restSeconds: currentUsage.restSeconds,
         progress: Math.round((currentUsage.currentSet / currentUsage.totalSets) * 100),
-        estimatedEndAt: currentUsage.estimatedEndAt,
-        // (선택) 현재 사용자 잔여 ETA
-        estimatedWaitMinutes: currentLeft,
+        setProgress,
+        estimatedMinutesLeft: currentETA,
+        restTimeLeft: currentUsage.setStatus === 'RESTING' && currentUsage.restStartedAt ? 
+          Math.max(0, Math.ceil((currentUsage.restSeconds * 1000 - (Date.now() - currentUsage.restStartedAt.getTime())) / 1000)) : 0
       } : null,
       waitingQueue: queue.map((q, i) => ({
         id: q.id,
@@ -530,119 +771,38 @@ router.get('/status/:equipmentId', async (req, res) => {
         status: q.status,
         createdAt: q.createdAt,
         notifiedAt: q.notifiedAt,
-        estimatedWaitMinutes: etas[i] || 0,
+        estimatedWaitMinutes: queueETAs[i] || 0,
       })),
       totalWaiting: queue.length,
-      averageWaitTime: queue.length ? etas[etas.length - 1] : 0,
+      averageWaitTime: queue.length ? Math.round(queueETAs.reduce((a, b) => a + b, 0) / queue.length) : 0,
     })
-  } catch (e) {
-    console.error('status error:', e)
-    res.status(500).json({ error: '상태 조회 실패' })
+  } catch (error) {
+    console.error('상태 조회 오류:', error)
+    res.status(500).json({ error: '상태 조회에 실패했습니다' })
   }
 })
 
-// ===================
-// 🔧 관리자 기능
-// ===================
-router.post('/reorder/:equipmentId', auth(), async (req, res) => {
+// 시스템 통계
+router.get('/admin/stats', auth(), async (req, res) => {
   try {
-    const equipmentId = toInt(req.params.equipmentId)
-    const count = await reorderQueue(equipmentId)
-    res.json({ message: '대기열 재정렬 완료', reorderedCount: count })
-  } catch (e) {
-    console.error('reorder error:', e)
-    res.status(500).json({ error: '재정렬 실패' })
-  }
-})
-
-router.post('/force-complete/:equipmentId', auth(), async (req, res) => {
-  try {
-    const equipmentId = toInt(req.params.equipmentId)
-    const usage = await prisma.equipmentUsage.findFirst({
-      where: { equipmentId, status: 'IN_USE' },
-      include: { equipment: true, user: { select: { name: true, email: true } } }
+    const activeUsages = await prisma.equipmentUsage.count({ 
+      where: { status: 'IN_USE' } 
     })
-    if (!usage) return res.status(404).json({ error: '사용 중 없음' })
-
-    await prisma.equipmentUsage.update({
-      where: { id: usage.id },
-      data: { status: 'COMPLETED', setStatus: 'FORCE_COMPLETED', endedAt: new Date() }
+    
+    const activeQueues = await prisma.waitingQueue.count({ 
+      where: { status: { in: ['WAITING', 'NOTIFIED'] } } 
     })
-    sendNotification(usage.userId, {
-      type: 'FORCE_COMPLETED',
-      title: '관리자 완료',
-      message: `${usage.equipment.name} 사용이 관리자에 의해 완료됨`,
-      equipmentId
-    })
-    setImmediate(() => notifyNextUser(equipmentId).catch(console.error))
-
-    res.json({ message: '강제 완료 처리', user: usage.user.name, equipment: usage.equipment.name })
-  } catch (e) {
-    console.error('force-complete error:', e)
-    res.status(500).json({ error: '강제 완료 실패' })
-  }
-})
-
-router.get('/stats', auth(), async (req, res) => {
-  try {
-    const now = new Date()
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const weekStart = new Date(todayStart.getTime() - 7 * 24 * 60 * 60 * 1000)
-
-    const todayStats = await prisma.equipmentUsage.aggregate({
-      where: { startedAt: { gte: todayStart }, status: 'COMPLETED' },
-      _count: { id: true }, _avg: { totalSets: true }
-    })
-    const weekStats = await prisma.equipmentUsage.aggregate({
-      where: { startedAt: { gte: weekStart }, status: 'COMPLETED' },
-      _count: { id: true }
-    })
-
-    const popular = await prisma.equipmentUsage.groupBy({
-      by: ['equipmentId'],
-      where: { startedAt: { gte: weekStart }, status: 'COMPLETED' },
-      _count: { equipmentId: true },
-      orderBy: { _count: { equipmentId: 'desc' } },
-      take: 5
-    })
-    const names = await prisma.equipment.findMany({
-      where: { id: { in: popular.map(p => p.equipmentId) } },
-      select: { id: true, name: true }
-    })
-
-    const activeUsers = await prisma.equipmentUsage.count({ where: { status: 'IN_USE' } })
-    const waitingUsers = await prisma.waitingQueue.count({ where: { status: { in: ['WAITING', 'NOTIFIED'] } } })
-
+    
     res.json({
-      today: { totalSessions: todayStats._count.id || 0, averageSets: Math.round(todayStats._avg.totalSets || 0) },
-      week: { totalSessions: weekStats._count.id || 0 },
-      current: { activeUsers, waitingUsers, totalUsers: activeUsers + waitingUsers },
-      popularEquipment: popular.map(p => ({
-        equipmentId: p.equipmentId,
-        equipmentName: names.find(n => n.id === p.equipmentId)?.name || 'Unknown',
-        usageCount: p._count.equipmentId
-      })),
+      activeUsages,
+      activeQueues,
+      autoUpdateCount: autoUpdateIntervals.size,
+      rateLimitedUsers: userUpdateLimiter.size,
+      timestamp: new Date()
     })
-  } catch (e) {
-    console.error('stats error:', e)
+  } catch (error) {
+    console.error('통계 조회 오류:', error)
     res.status(500).json({ error: '통계 조회 실패' })
-  }
-})
-
-router.post('/cleanup', auth(), async (req, res) => {
-  try {
-    const now = Date.now()
-    const expired = await prisma.waitingQueue.updateMany({
-      where: { status: 'NOTIFIED', notifiedAt: { lt: new Date(now - 10 * 60 * 1000) } },
-      data: { status: 'EXPIRED' }
-    })
-    const oldRecords = await prisma.equipmentUsage.count({
-      where: { status: 'COMPLETED', endedAt: { lt: new Date(now - 24 * 60 * 60 * 1000) } }
-    })
-    res.json({ message: '정리 완료', expiredQueues: expired.count, oldRecords })
-  } catch (e) {
-    console.error('cleanup error:', e)
-    res.status(500).json({ error: '정리 작업 실패' })
   }
 })
 
