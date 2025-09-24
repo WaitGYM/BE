@@ -82,8 +82,6 @@
 Authorization: Bearer <JWT_TOKEN>
 ```
 
----
-
 ## 📋 Equipment API
 
 ### GET `/api/equipment`
