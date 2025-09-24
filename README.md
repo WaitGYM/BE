@@ -237,7 +237,7 @@ Authorization: Bearer <token> (선택사항)
 
 ### 2.5 완료한 운동 목록 조회
 ```
-GET /api/equipment/my-completed?date=2025-01-15&limit=20
+GET /api/equipment/my-completed?date=2025-01-15&limit=20 // /api/equipment/my-completed만 해도 가능
 Authorization: Bearer <token>
 ```
 **요청바디**: 없음  
