@@ -512,6 +512,119 @@ router.post('/complete-set/:equipmentId', auth(), async (req, res) => {
   }
 })
 
+// 🔥 휴식 건너뛰기 API (실시간 업데이트 포함)
+router.post('/skip-rest/:equipmentId', auth(), async (req, res) => {
+  try {
+    const equipmentId = parseInt(req.params.equipmentId)
+    
+    const usage = await prisma.equipmentUsage.findFirst({
+      where: { 
+        equipmentId, 
+        userId: req.user.id, 
+        status: 'IN_USE' 
+      },
+      include: { 
+        equipment: true, 
+        user: { select: { name: true } } 
+      }
+    })
+    
+    if (!usage) {
+      return res.status(404).json({ error: '현재 사용 중인 기구가 없습니다' })
+    }
+    
+    if (usage.setStatus !== 'RESTING') {
+      return res.status(400).json({ 
+        error: '휴식 중이 아닙니다',
+        currentStatus: usage.setStatus,
+        message: '휴식 중일 때만 건너뛸 수 있습니다'
+      })
+    }
+
+    // 다음 세트로 진행
+    const nextSet = usage.currentSet + 1
+    const isLastSet = nextSet > usage.totalSets
+
+    if (isLastSet) {
+      // 마지막 세트였다면 운동 완료
+      await prisma.equipmentUsage.update({
+        where: { id: usage.id },
+        data: {
+          status: 'COMPLETED',
+          setStatus: 'COMPLETED',
+          endedAt: new Date()
+        }
+      })
+
+      // 🔥 운동 완료 브로드캐스트
+      broadcastEquipmentStatusChange(equipmentId, {
+        type: 'usage_completed',
+        equipmentName: usage.equipment.name,
+        userName: usage.user.name,
+        totalSets: usage.totalSets,
+        completedAt: new Date(),
+        wasSkipped: true
+      })
+
+      // 자동 업데이트 중지
+      stopAutoUpdate(equipmentId)
+
+      // 다음 대기자 알림
+      setTimeout(() => notifyNextUser(equipmentId), 1000)
+
+      return res.json({
+        message: `전체 ${usage.totalSets}세트 완료!`,
+        completed: true,
+        skippedRest: true
+      })
+    }
+
+    // 다음 세트 시작
+    await prisma.equipmentUsage.update({
+      where: { id: usage.id },
+      data: {
+        currentSet: nextSet,
+        setStatus: 'EXERCISING',
+        currentSetStartedAt: new Date(),
+        restStartedAt: null // 휴식 시간 초기화
+      }
+    })
+
+    // 🔥 다음 세트 시작 브로드캐스트
+    broadcastEquipmentStatusChange(equipmentId, {
+      type: 'rest_skipped',
+      equipmentName: usage.equipment.name,
+      userName: usage.user.name,
+      currentSet: nextSet,
+      totalSets: usage.totalSets,
+      skippedAt: new Date()
+    })
+
+    // 사용자에게 알림
+    sendNotification(req.user.id, {
+      type: 'REST_SKIPPED',
+      title: '휴식 건너뛰기',
+      message: `${nextSet}/${usage.totalSets} 세트 시작`,
+      equipmentId,
+      currentSet: nextSet,
+      totalSets: usage.totalSets
+    })
+
+    res.json({
+      message: `휴식을 건너뛰고 ${nextSet}/${usage.totalSets} 세트를 시작합니다`,
+      currentSet: nextSet,
+      totalSets: usage.totalSets,
+      setStatus: 'EXERCISING',
+      skippedRest: true,
+      progress: Math.round((nextSet / usage.totalSets) * 100)
+    })
+
+  } catch (error) {
+    console.error('휴식 건너뛰기 오류:', error)
+    res.status(500).json({ error: '휴식 건너뛰기에 실패했습니다' })
+  }
+})
+
 // 🔥 운동 중단 API (실시간 업데이트 포함)
 router.post('/stop-exercise/:equipmentId', auth(), async (req, res) => {
   try {
