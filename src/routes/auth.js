@@ -48,9 +48,7 @@ router.get(
       };
 
       // 프론트엔드로 리다이렉트 (토큰을 쿼리로 전달)
-      const redirectUrl = `${
-        process.env.FRONTEND_URL
-      }/oauth-success?token=${token}&user=${encodeURIComponent(
+      const redirectUrl = `wait-gym-mobile://login-success?token=${token}&user=${encodeURIComponent(
         JSON.stringify(user)
       )}`;
       res.redirect(redirectUrl);
