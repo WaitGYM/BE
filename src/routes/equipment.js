@@ -70,7 +70,7 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
         myCompletedToday.set(usage.equipmentId, {
           status: usage.status,
           lastCompletedAt: usage.endedAt,
-          totalSets: usage.currentSet,
+          totalSets: usage.totalSets,   // ✅ currentSet → totalSets
           setStatus: usage.setStatus,
           duration: Math.round((new Date(usage.endedAt) - new Date(usage.startedAt)) / 60000)
         })
@@ -90,6 +90,9 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
     const canStart = isAvailable && !myQueue && (!myCurrentUsage || myCurrentUsage.equipmentId === equipmentId)
     const canQueue = !isAvailable && !myQueue && (!myCurrentUsage || myCurrentUsage.equipmentId === equipmentId)
 
+    // ✅ 오늘 내가 완료한 기록(있으면) 꺼내기
+    const myCompleted = userId ? (myCompletedToday.get(equipmentId) || null) : null
+
     statusMap.set(equipmentId, {
       isAvailable,
       currentUser: currentUsage ? currentUsage.user.name : null,
@@ -99,7 +102,10 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
         currentSet: currentUsage.currentSet,
         setStatus: currentUsage.setStatus,
         restSeconds: currentUsage.restSeconds,
-        progress: Math.round((currentUsage.currentSet / currentUsage.totalSets) * 100),
+        progress: (currentUsage.totalSets > 0)
+        ? Math.round((currentUsage.currentSet / currentUsage.totalSets) * 100)
+        : 0,
+
         estimatedEndAt: currentUsage.estimatedEndAt
       } : null,
       waitingCount: queueCount,
@@ -109,11 +115,13 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
       canQueue: userId ? canQueue : false,
 
       // 🆕 완료 표시 정보 추가
-      completedToday: userId ? !!myCompleted : false,
-      lastCompletedAt: myCompleted ? myCompleted.lastCompletedAt : null,
-      lastCompletedSets: myCompleted ? myCompleted.totalSets : null,
-      lastCompletedDuration: myCompleted ? myCompleted.duration : null,
-      wasFullyCompleted: myCompleted ? myCompleted.Status === 'COMPLETED' : false
+      // ✅ 완료 정보(미정의/오타 방지)
+      completedToday: !!myCompleted,
+      lastCompletedAt: myCompleted?.lastCompletedAt ?? null,
+      lastCompletedSets: myCompleted?.totalSets ?? null,
+      lastCompletedDuration: myCompleted?.duration ?? null,
+      wasFullyCompleted: myCompleted?.status === 'COMPLETED'
+
 
     })
   })
