@@ -7,7 +7,7 @@ async function main() {
   // 헬스장 기구들 (카테고리 정보 포함)
   const equipmentData = [
     { 
-      name: '스미스 머신 스쿼트', 
+      name: '스미스 머신', 
       imageUrl: null,
       category: '다리',
       muscleGroup: '대퇴사두근, 둔근, 햄스트링, 내전근'
@@ -19,7 +19,7 @@ async function main() {
       muscleGroup: '전신'
     },
     { 
-      name: '케이블 와이 레이즈', 
+      name: '케이블머신', 
       imageUrl: null,
       category: '어깨',
       muscleGroup: '삼각근, 승모근'    },
@@ -29,22 +29,22 @@ async function main() {
       category: '등',
       muscleGroup: '광배근, 이두'    },
     { 
-      name: '레그 프레스', 
+      name: '레그프레스', 
       imageUrl: null,
       category: '다리',
       muscleGroup: '대퇴사두근, 둔근'    },
     { 
-      name: '레그 컬', 
+      name: '레그컬', 
       imageUrl: null,
       category: '다리',
       muscleGroup: '햄스트링'    },
     { 
-      name: '어시스티드 머신 친업', 
+      name: '풀업', 
       imageUrl: null,
       category: '등',
       muscleGroup: '광배근, 이두, 어깨'    },
     { 
-      name: '바벨 벤치 프레스', 
+      name: '벤치 프레스', 
       imageUrl: null,
       category: '가슴',
       muscleGroup: '대흉근, 삼두, 어깨'    },
@@ -54,7 +54,7 @@ async function main() {
       category: '등',
       muscleGroup: '척추기립근, 둔근'    },
     { 
-      name: '힙 어브덕션/어덕션', 
+      name: '힙 어브덕션/힙 어덕션', 
       imageUrl: null,
       category: '다리',
       muscleGroup: '둔근, 내전근'    },
@@ -62,12 +62,7 @@ async function main() {
       name: '트레드밀', 
       imageUrl: null,
       category: '유산소',
-      muscleGroup: '전신'    },
-    { 
-      name: '스쿼트 랙', 
-      imageUrl: null,
-      category: '다리',
-      muscleGroup: '대퇴사두근, 둔근, 햄스트링'    },
+      muscleGroup: '전신'    }
   ]
 
   for (const equipment of equipmentData) {

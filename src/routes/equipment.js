@@ -3,7 +3,7 @@ const { PrismaClient } = require('@prisma/client');
 const { auth } = require('../middleware/auth');
 const { authOptional } = require('../utils/authOptional');
 const { getEquipmentStatusInfo } = require('../services/equipment.service');
-const { startOfDay, endOfDay, toMinutes } = require('../utils/time');
+const { startOfDay, endOfDay } = require('../utils/time'); // toMinutes 제거
 const asyncRoute = require('../utils/asyncRoute');
 
 const prisma = new PrismaClient();
@@ -41,7 +41,7 @@ router.get('/', asyncRoute(async (req, res) => {
       status: statusMap.get(e.id) || {
         isAvailable: true, currentUser: null, currentUserStartedAt: null, currentUsageInfo: null,
         waitingCount: 0, myQueuePosition: null, myQueueStatus: null, canStart: false, canQueue: false,
-        completedToday: false, lastCompletedAt: null, lastCompletedSets: null, lastCompletedDuration: null, wasFullyCompleted: false,
+        completedToday: false, lastCompletedAt: null, lastCompletedSets: null, lastCompletedDurationSeconds: null, wasFullyCompleted: false,
       },
     } : {}),
   }));
@@ -120,9 +120,11 @@ router.get('/my-completed', auth(), asyncRoute(async (req, res) => {
   const resp = rows.map((u) => ({
     id: u.id, equipmentId: u.equipmentId, equipment: u.equipment,
     startedAt: u.startedAt, endedAt: u.endedAt, totalSets: u.totalSets, completedSets: u.currentSet,
-    restMinutes: typeof u.restSeconds === 'number' ? Math.floor(u.restSeconds / 60) : null,
+    // 🔁 분 → 초
+    restSeconds: typeof u.restSeconds === 'number' ? u.restSeconds : null,
     setStatus: u.setStatus,
-    duration: (u.startedAt && u.endedAt) ? Math.round((u.endedAt - u.startedAt) / 60000) : null,
+    // 🔁 분 → 초
+    durationSeconds: (u.startedAt && u.endedAt) ? Math.round((u.endedAt - u.startedAt) / 1000) : null,
     isFullyCompleted: u.setStatus === 'COMPLETED',
     wasInterrupted: ['STOPPED', 'FORCE_COMPLETED'].includes(u.setStatus),
   }));
@@ -152,18 +154,18 @@ router.get('/my-stats', auth(), asyncRoute(async (req, res) => {
   const equipmentStats = {};
   const categoryStats = {};
   let totalSets = 0;
-  let totalMinutes = 0;
+  let totalSeconds = 0;
 
   stats.forEach((u) => {
     const k = u.equipmentId;
-    if (!equipmentStats[k]) equipmentStats[k] = { equipment: u.equipment, count: 0, totalSets: 0, totalMinutes: 0, lastUsed: null };
+    if (!equipmentStats[k]) equipmentStats[k] = { equipment: u.equipment, count: 0, totalSets: 0, totalSeconds: 0, lastUsed: null };
     equipmentStats[k].count += 1;
     equipmentStats[k].totalSets += (u.currentSet || 0);
     if (u.startedAt && u.endedAt) {
-      const m = Math.round((u.endedAt - u.startedAt) / 60000);
-      equipmentStats[k].totalMinutes += m;
+      const s = Math.round((u.endedAt - u.startedAt) / 1000);
+      equipmentStats[k].totalSeconds += s;
       equipmentStats[k].lastUsed = !equipmentStats[k].lastUsed || u.endedAt > equipmentStats[k].lastUsed ? u.endedAt : equipmentStats[k].lastUsed;
-      totalMinutes += m;
+      totalSeconds += s;
     }
     totalSets += (u.currentSet || 0);
 
@@ -177,7 +179,7 @@ router.get('/my-stats', auth(), asyncRoute(async (req, res) => {
     period,
     totalWorkouts: stats.length,
     totalSets,
-    totalMinutes,
+    totalSeconds, // 🔁 분 → 초
     averageSetsPerWorkout: stats.length ? Math.round(totalSets / stats.length) : 0,
     equipmentStats: Object.values(equipmentStats).sort((a, b) => b.count - a.count),
     categoryStats: Object.entries(categoryStats).map(([category, data]) => ({ category, ...data })).sort((a, b) => b.count - a.count),
@@ -260,6 +262,7 @@ router.post('/:id/quick-start', auth(), asyncRoute(async (req, res) => {
         setStatus: 'EXERCISING',
         currentSet: 1,
         currentSetStartedAt: new Date(),
+        // restSeconds(초) → 분 환산 → 분을 ms로 변환
         estimatedEndAt: new Date(Date.now() + ((totalSets * 5) + ((totalSets - 1) * (restSeconds / 60))) * 60 * 1000),
       },
     });
@@ -284,7 +287,7 @@ router.post('/:id/quick-queue', auth(), asyncRoute(async (req, res) => {
   });
   if (existingQueue) {
     return res.status(409).json({ error: '이미 대기열에 등록되어 있습니다', queuePosition: existingQueue.queuePosition, status: existingQueue.status });
-    }
+  }
 
   const myUsage = await prisma.equipmentUsage.findFirst({ where: { userId: req.user.id, status: 'IN_USE' }, include: { equipment: { select: { name: true } } } });
   if (myUsage) return res.status(409).json({ error: '이미 다른 기구를 사용 중입니다', currentEquipment: myUsage.equipment.name });
@@ -297,7 +300,8 @@ router.post('/:id/quick-queue', auth(), asyncRoute(async (req, res) => {
     equipmentName: queue.equipment.name,
     queuePosition: queue.queuePosition,
     queueId: queue.id,
-    estimatedWaitMinutes: Math.max(5, length * 15),
+    // 🔁 분 → 초
+    estimatedWaitSeconds: Math.max(300, length * 900),
   });
 }));
 

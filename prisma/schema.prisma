@@ -67,7 +67,7 @@ model EquipmentUsage {
   estimatedEndAt DateTime? // 예상 종료 시간 (선택사항)
   // 총 세트 & 휴식
   totalSets      Int       @default(1) // 총 세트 수
-  restSeconds    Int       @default(180) // 세트 사이 휴식(분)
+  restSeconds    Int       @default(180) // 세트 사이 휴식(초)
 
   // 세션 상태
   status String @default("IN_USE") // IN_USE | COMPLETED
@@ -128,7 +128,7 @@ model RoutineExercise {
   order       Int // 루틴 내 순서
   targetSets  Int      @default(3)
   targetReps  String? // "8-12" 또는 "10" 형태
-  restMinutes Int      @default(3)
+  restSeconds Int      @default(180)
   notes       String? // 개인 메모 (무게, 특이사항 등)
   createdAt   DateTime @default(now())
 
