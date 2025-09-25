@@ -37,7 +37,7 @@
 
 ### ⭐ Favorites API
 - `GET /api/favorites` - 내 즐겨찾기 목록
-- `POST /api/favorites` - 즐겨찾기 추가
+- `POST /api/favorites/:equipmentId` - 즐겨찾기 추가
 - `DELETE /api/favorites/equipment/:equipmentId` - 즐겨찾기 제거
 - `GET /api/favorites/check/:equipmentId` - 즐겨찾기 상태 확인
 
