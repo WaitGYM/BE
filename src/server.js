@@ -20,7 +20,6 @@ const { setupWebSocket } = require('./websocket')
 // Routes
 const authRoutes = require('./routes/auth')
 const equipmentRoutes = require('./routes/equipment')
-const reservationRoutes = require('./routes/reservations')
 const favoriteRoutes = require('./routes/favorites')
 const { router: waitingRoutes } = require('./routes/waiting')
 
@@ -108,7 +107,6 @@ app.get('/health', (_req, res) => res.json({ ok: true, time: new Date().toISOStr
 /** ===================== 라우터 ===================== */
 app.use('/api/auth', authRoutes)
 app.use('/api/equipment', equipmentRoutes)
-app.use('/api/reservations', reservationRoutes)
 app.use('/api/favorites', favoriteRoutes)
 app.use('/api/waiting', waitingRoutes) // 웨이팅 시스템
 app.use('/api/routines', routineRoutes) //루틴

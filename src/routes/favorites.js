@@ -12,7 +12,9 @@ router.get('/', auth(), async (req, res) => {
         equipment: {
           include: {
             _count: {
-              select: { reservations: true }
+              select: { 
+                waitingQueues: true
+               }
             }
           }
         }
@@ -29,7 +31,6 @@ router.get('/', auth(), async (req, res) => {
         imageUrl: fav.equipment.imageUrl,
         category: fav.equipment.category,
         muscleGroup: fav.equipment.muscleGroup,
-        reservationCount: fav.equipment._count.reservations,
         isFavorite: true
       }
     })))

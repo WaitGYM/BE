@@ -18,7 +18,6 @@ model User {
   avatar   String?
 
   createdAt    DateTime      @default(now())
-  reservations Reservation[]
   favorites    Favorite[]
 
   // 웨이팅 시스템 관계 추가
@@ -36,7 +35,6 @@ model Equipment {
   category     String // 부위별 카테고리 (가슴, 등, 다리, 어깨, 팔, 유산소 등)
   muscleGroup  String? // 세부 근육 그룹 (선택사항)
   createdAt    DateTime      @default(now())
-  reservations Reservation[]
   favorites    Favorite[]
 
   // 웨이팅 시스템 관계 추가
@@ -57,23 +55,6 @@ model Favorite {
   equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
 
   @@unique([userId, equipmentId]) // 중복 즐겨찾기 방지
-}
-
-// 기존 예약 시스템 (시간 기반) - 호환성 유지
-model Reservation {
-  id          Int      @id @default(autoincrement())
-  userId      Int
-  equipmentId Int
-  startAt     DateTime
-  endAt       DateTime
-  sets        Int      @default(1)
-  restSeconds Int      @default(180)
-  status      String   @default("BOOKED")
-
-  user      User      @relation(fields: [userId], references: [id])
-  equipment Equipment @relation(fields: [equipmentId], references: [id])
-
-  @@index([equipmentId, startAt, endAt])
 }
 
 // 🔥 웨이팅 시스템: 현재 기구 사용 상태

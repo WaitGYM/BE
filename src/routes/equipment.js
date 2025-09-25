@@ -164,7 +164,9 @@ router.get('/', async (req, res) => {
       orderBy: { name: 'asc' },
       include: {
         _count: {
-          select: { reservations: true }
+          select: { 
+            waitingQueues: true
+           }
         },
         // 사용자가 로그인했으면 즐겨찾기 정보 포함
         favorites: userId ? {
@@ -190,7 +192,6 @@ router.get('/', async (req, res) => {
         category: equipment.category,
         muscleGroup: equipment.muscleGroup,
         createdAt: equipment.createdAt,
-        reservationCount: equipment._count.reservations,
         isFavorite: userId ? equipment.favorites.length > 0 : false
       }
 
@@ -563,16 +564,6 @@ router.get('/:id', async (req, res) => {
     const equipment = await prisma.equipment.findUnique({
       where: { id },
       include: {
-        reservations: {
-          where: {
-            startAt: { gte: new Date() }
-          },
-          orderBy: { startAt: 'asc' },
-          take: 10,
-          include: {
-            user: { select: { name: true } }
-          }
-        },
         favorites: userId ? {
           where: { userId },
           select: { id: true }
@@ -599,7 +590,6 @@ router.get('/:id', async (req, res) => {
       category: equipment.category,
       muscleGroup: equipment.muscleGroup,
       createdAt: equipment.createdAt,
-      reservations: equipment.reservations,
       isFavorite: userId ? equipment.favorites.length > 0 : false,
       favoriteCount: equipment._count.favorites,
       status: status // 🔥 실시간 상태 정보 포함
