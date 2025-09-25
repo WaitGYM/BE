@@ -51,7 +51,7 @@
 
 **📝 대기열 관리:**
 - `POST /api/waiting/queue/:equipmentId` - 대기열 등록(해당 기구에 대기 시작)
-- `DELETE /api/waiting/queue/:queueId` - 대기열 취소(현재 서버 미구현)
+- `DELETE /api/waiting/queue/:queueId` - 대기열 취소
 - `GET /api/waiting/status/:equipmentId` - 기구 상태 및 대기열 조회
 - `POST /api/waiting/update-eta/:equipmentId` - (수동) 예상 대기시간 업데이트 + 브로드캐스트
 
