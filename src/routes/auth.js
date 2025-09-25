@@ -1,111 +1,59 @@
-const router = require("express").Router();
-const { PrismaClient } = require("@prisma/client");
+const router = require('express').Router();
+const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
-const jwt = require("jsonwebtoken");
-const passport = require("passport");
+const jwt = require('jsonwebtoken');
+const passport = require('passport');
+const asyncRoute = require('../utils/asyncRoute');
 
-// 구글 OAuth 로그인 시작 (권장: URLSearchParams로 안전 조립)
+// GET /api/auth/google
 router.get('/google', (req, res) => {
   const params = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID,
-    redirect_uri: process.env.GOOGLE_REDIRECT_URI,   // .env와 구글 콘솔 값과 완전 일치
+    redirect_uri: process.env.GOOGLE_REDIRECT_URI,
     response_type: 'code',
-    scope: 'openid email profile',                   // 권장 스코프(인코딩 자동)
-    // 선택(테스트/리프레시 토큰 필요 시):
-    // prompt: 'consent',
-    // access_type: 'offline',
-    // state: crypto.randomUUID(),
+    scope: 'openid email profile',
   });
-
   res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
 });
 
-
-// 구글 OAuth 콜백
-router.get(
-  "/google/callback",
-  passport.authenticate("google", {
-    failureRedirect: `${process.env.FRONTEND_URL}/?error=auth_failed`,
-  }),
+// GET /api/auth/google/callback
+router.get('/google/callback',
+  passport.authenticate('google', { failureRedirect: `${process.env.FRONTEND_URL}/?error=auth_failed` }),
   (req, res) => {
-    try {
-      // JWT 토큰 생성
-      const token = jwt.sign(
-        {
-          id: req.user.id,
-          email: req.user.email,
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: "7d" }
-      );
-
-      // 사용자 정보
-      const user = {
-        id: req.user.id,
-        email: req.user.email,
-        name: req.user.name,
-        avatar: req.user.avatar,
-      };
-
-      // 프론트엔드로 리다이렉트 (토큰을 쿼리로 전달)
-      const redirectUrl = `${
-        process.env.FRONTEND_URL
-      }/oauth-success?token=${token}&user=${encodeURIComponent(
-        JSON.stringify(user)
-      )}`;
-      res.redirect(redirectUrl);
-    } catch (error) {
-      console.error("Token generation error:", error);
-      res.redirect(`${process.env.FRONTEND_URL}/?error=token_failed`);
-    }
-  }
+    const token = jwt.sign({ id: req.user.id, email: req.user.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const user = { id: req.user.id, email: req.user.email, name: req.user.name, avatar: req.user.avatar };
+    const redirectUrl = `${process.env.FRONTEND_URL}/oauth-success?token=${token}&user=${encodeURIComponent(JSON.stringify(user))}`;
+    res.redirect(redirectUrl);
+  },
 );
 
-// 로그아웃
-router.post("/logout", (req, res) => {
+// POST /api/auth/logout
+router.post('/logout', (req, res) => {
   req.logout((err) => {
-    if (err) {
-      return res.status(500).json({ error: "로그아웃 실패" });
-    }
-    req.session.destroy((err) => {
-      if (err) {
-        return res.status(500).json({ error: "세션 삭제 실패" });
-      }
-      res.json({ message: "로그아웃 성공" });
-    });
+    if (err) return res.status(500).json({ error: '로그아웃 실패' });
+    req.session.destroy((e) => (e ? res.status(500).json({ error: '세션 삭제 실패' }) : res.json({ message: '로그아웃 성공' })));
   });
 });
 
-// 현재 사용자 정보 조회 (JWT 토큰 기반)
-router.get("/me", async (req, res) => {
+// GET /api/auth/me
+router.get('/me', asyncRoute(async (req, res) => {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token) return res.status(401).json({ error: '토큰이 필요합니다' });
+
+  let payload;
   try {
-    const header = req.headers.authorization || "";
-    const token = header.startsWith("Bearer ") ? header.slice(7) : null;
-
-    if (!token) {
-      return res.status(401).json({ error: "토큰이 필요합니다" });
-    }
-
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await prisma.user.findUnique({
-      where: { id: payload.id },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        avatar: true,
-        createdAt: true,
-      },
-    });
-
-    if (!user) {
-      return res.status(404).json({ error: "사용자를 찾을 수 없습니다" });
-    }
-
-    res.json(user);
-  } catch (error) {
-    return res.status(401).json({ error: "유효하지 않은 토큰" });
+    payload = jwt.verify(token, process.env.JWT_SECRET);
+  } catch {
+    return res.status(401).json({ error: '유효하지 않은 토큰' });
   }
-});
+
+  const user = await prisma.user.findUnique({
+    where: { id: payload.id },
+    select: { id: true, email: true, name: true, avatar: true, createdAt: true },
+  });
+  if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다' });
+  res.json(user);
+}));
 
 module.exports = router;
