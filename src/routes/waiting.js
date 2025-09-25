@@ -12,6 +12,95 @@ const {
 
 const prisma = new PrismaClient();
 
+// POST /api/waiting/queue/:equipmentId - 대기열 등록
+router.post('/queue/:equipmentId', auth(), asyncRoute(async (req, res) => {
+  const equipmentId = parseInt(req.params.equipmentId, 10);
+
+  const equipment = await prisma.equipment.findUnique({ where: { id: equipmentId } });
+  if (!equipment) return res.status(404).json({ error: '기구를 찾을 수 없습니다' });
+
+  // 이미 내 대기가 있으면 차단
+  const existingQueue = await prisma.waitingQueue.findFirst({
+    where: { equipmentId, userId: req.user.id, status: { in: ['WAITING', 'NOTIFIED'] } },
+  });
+  if (existingQueue) {
+    return res.status(409).json({
+      error: '이미 대기열에 등록되어 있습니다',
+      queuePosition: existingQueue.queuePosition,
+      status: existingQueue.status,
+    });
+  }
+
+  // 다른 기구 사용 중이면 차단
+  const myUsage = await prisma.equipmentUsage.findFirst({
+    where: { userId: req.user.id, status: 'IN_USE' },
+    include: { equipment: { select: { name: true } } },
+  });
+  if (myUsage) {
+    return res.status(409).json({
+      error: '이미 다른 기구를 사용 중입니다',
+      currentEquipment: myUsage.equipment.name,
+      equipmentId: myUsage.equipmentId,
+    });
+  }
+
+  // 현재 대기 길이 → 나의 position
+  const length = await prisma.waitingQueue.count({
+    where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } },
+  });
+
+  const queue = await prisma.waitingQueue.create({
+    data: {
+      equipmentId,
+      userId: req.user.id,
+      queuePosition: length + 1,
+      status: 'WAITING',
+    },
+    include: { user: { select: { name: true } } },
+  });
+
+  // 예상 대기시간 계산
+  const currentUsage = await prisma.equipmentUsage.findFirst({
+    where: { equipmentId, status: 'IN_USE' },
+  });
+
+  let estimatedWaitMinutes = 0;
+  if (currentUsage) {
+    const queueList = await prisma.waitingQueue.findMany({
+      where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } },
+      orderBy: { queuePosition: 'asc' },
+    });
+    const currentETA = calculateRealTimeETA(currentUsage);
+    const etas = buildQueueETAs(currentETA, queueList);
+    const idx = queueList.findIndex((q) => q.id === queue.id);
+    estimatedWaitMinutes = etas[idx] ?? 0;
+
+    // 자동 ETA 업데이트 루프 보장
+    startAutoUpdate(equipmentId);
+  } else {
+    // 기구가 비어 있다면 바로 다음 사용자 알림(내가 NOTIFIED가 됨)
+    setTimeout(() => notifyNextUser(equipmentId), 300);
+  }
+
+  // 실시간 브로드캐스트
+  require('../websocket').broadcastEquipmentStatusChange(equipmentId, {
+    type: 'queue_joined',
+    equipmentName: equipment.name,
+    userName: queue.user.name,
+    queuePosition: queue.queuePosition,
+    queueId: queue.id,
+  });
+
+  res.status(201).json({
+    message: `${equipment.name} 대기열에 등록되었습니다`,
+    equipmentName: equipment.name,
+    queuePosition: queue.queuePosition,
+    queueId: queue.id,
+    estimatedWaitMinutes,
+  });
+}));
+
+
 // POST /api/waiting/update-eta/:equipmentId
 router.post('/update-eta/:equipmentId', auth(), asyncRoute(async (req, res) => {
   const equipmentId = parseInt(req.params.equipmentId, 10);
@@ -226,6 +315,64 @@ router.get('/status/:equipmentId', asyncRoute(async (req, res) => {
     waitingQueue: queue.map((q, i) => ({ id: q.id, position: q.queuePosition, userName: q.user.name, status: q.status, createdAt: q.createdAt, notifiedAt: q.notifiedAt, estimatedWaitMinutes: queueETAs[i] || 0 })),
     totalWaiting: queue.length,
     averageWaitTime: queue.length ? Math.round(queueETAs.reduce((a, b) => a + b, 0) / queue.length) : 0,
+  });
+}));
+
+// DELETE /api/waiting/queue/:queueId
+router.delete('/queue/:queueId', auth(), asyncRoute(async (req, res) => {
+  const queueId = parseInt(req.params.queueId, 10);
+  if (!queueId) return res.status(400).json({ error: '유효한 queueId가 필요합니다' });
+
+  // 대상 큐 조회
+  const q = await prisma.waitingQueue.findUnique({
+    where: { id: queueId },
+    include: { equipment: true },
+  });
+  if (!q) return res.status(404).json({ error: '대기열 항목을 찾을 수 없습니다' });
+
+  // 소유자(또는 관리자)만 취소 가능
+  // (관리자 권한 필드가 있다면 req.user.role === 'ADMIN' 같은 체크를 병행)
+  if (q.userId !== req.user.id /* && req.user.role !== 'ADMIN' */) {
+    return res.status(403).json({ error: '본인 대기열만 취소할 수 있습니다' });
+  }
+
+  // 활성 상태만 취소 허용
+  if (!['WAITING', 'NOTIFIED'].includes(q.status)) {
+    return res.status(409).json({ error: '이미 활성 대기열이 아닙니다', status: q.status });
+  }
+
+  // 상태 비활성화 처리
+  // (스키마 열거형에 CANCELLED가 없다면 EXPIRED를 사용해 비활성화 상태로 둡니다)
+  await prisma.waitingQueue.update({
+    where: { id: queueId },
+    data: { status: 'EXPIRED' },
+  });
+
+  // 포지션 재정렬
+  const remaining = await reorderQueue(q.equipmentId);
+
+  // 내가 NOTIFIED(호출받은 상태)였으면 다음 사람에게 알림
+  if (q.status === 'NOTIFIED') {
+    setTimeout(() => notifyNextUser(q.equipmentId), 500);
+  }
+
+  // 실시간 브로드캐스트
+  const { broadcastEquipmentStatusChange } = require('../websocket');
+  broadcastEquipmentStatusChange(q.equipmentId, {
+    type: 'queue_cancelled',
+    equipmentName: q.equipment.name,
+    cancelledQueueId: q.id,
+    remainingWaiting: remaining,
+    cancelledBy: req.user.id,
+  });
+
+  res.status(200).json({
+    message: '대기열이 취소되었습니다',
+    queueId: q.id,
+    equipmentId: q.equipmentId,
+    equipmentName: q.equipment.name,
+    prevStatus: q.status,
+    remainingWaiting: remaining,
   });
 }));
 
