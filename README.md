@@ -41,14 +41,6 @@
 - `DELETE /api/favorites/equipment/:equipmentId` - 즐겨찾기 제거
 - `GET /api/favorites/check/:equipmentId` - 즐겨찾기 상태 확인
 
-### 📅 Reservations API (기존 예약 시스템) => 제거할 테이블
-- `POST /api/reservations` - 예약 생성
-- `GET /api/reservations/me` - 내 예약 목록
-- `GET /api/reservations/:id` - 특정 예약 상세 조회
-- `PUT /api/reservations/:id` - 예약 수정
-- `DELETE /api/reservations/:id` - 예약 삭제
-- `GET /api/reservations/availability` - 예약 가능 시간 확인
-- `GET /api/reservations/equipment/:equipmentId` - 특정 기구의 예약 현황 조회 (선택 날짜에 대한 일정, 공개)
 
 ### ⏰ 수정된 Waiting System API (웨이팅 시스템)
 **🏋️ 운동 관리:**
