@@ -20,7 +20,7 @@ model User {
   createdAt    DateTime      @default(now())
   reservations Reservation[]
   favorites    Favorite[]
-  
+
   // 웨이팅 시스템 관계 추가
   equipmentUsages EquipmentUsage[]
   waitingQueues   WaitingQueue[]
@@ -33,12 +33,12 @@ model Equipment {
   id           Int           @id @default(autoincrement())
   name         String        @unique
   imageUrl     String?
-  category     String        // 부위별 카테고리 (가슴, 등, 다리, 어깨, 팔, 유산소 등)
-  muscleGroup  String?       // 세부 근육 그룹 (선택사항)
+  category     String // 부위별 카테고리 (가슴, 등, 다리, 어깨, 팔, 유산소 등)
+  muscleGroup  String? // 세부 근육 그룹 (선택사항)
   createdAt    DateTime      @default(now())
   reservations Reservation[]
   favorites    Favorite[]
-  
+
   // 웨이팅 시스템 관계 추가
   equipmentUsages EquipmentUsage[]
   waitingQueues   WaitingQueue[]
@@ -48,10 +48,10 @@ model Equipment {
 }
 
 model Favorite {
-  id          Int       @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   userId      Int
   equipmentId Int
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime @default(now())
 
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
@@ -78,18 +78,18 @@ model Reservation {
 
 // 🔥 웨이팅 시스템: 현재 기구 사용 상태
 model EquipmentUsage {
-  id              Int       @id @default(autoincrement())
-  equipmentId     Int
-  userId          Int
-  startedAt       DateTime  @default(now())
-  endedAt         DateTime? // 사용 완료 시간
-  estimatedEndAt  DateTime? // 예상 종료 시간 (선택사항)
+  id             Int       @id @default(autoincrement())
+  equipmentId    Int
+  userId         Int
+  startedAt      DateTime  @default(now())
+  endedAt        DateTime? // 사용 완료 시간
+  estimatedEndAt DateTime? // 예상 종료 시간 (선택사항)
   // 총 세트 & 휴식
-  totalSets          Int       @default(1)    // 총 세트 수
-  restSeconds        Int       @default(180)    // 세트 사이 휴식(분)
+  totalSets      Int       @default(1) // 총 세트 수
+  restSeconds    Int       @default(180) // 세트 사이 휴식(분)
 
   // 세션 상태
-  status             String    @default("IN_USE") // IN_USE | COMPLETED
+  status String @default("IN_USE") // IN_USE | COMPLETED
 
   // 🔥 세트/휴식 정밀 추적
   currentSet          Int       @default(1)
@@ -97,7 +97,7 @@ model EquipmentUsage {
   currentSetStartedAt DateTime?
   restStartedAt       DateTime?
 
-  createdAt          DateTime  @default(now())
+  createdAt DateTime @default(now())
 
   user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
   equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Restrict)
@@ -110,7 +110,7 @@ model WaitingQueue {
   id            Int       @id @default(autoincrement())
   equipmentId   Int
   userId        Int
-  queuePosition Int       // 대기 순서 (1, 2, 3, ...)
+  queuePosition Int // 대기 순서 (1, 2, 3, ...)
   status        String    @default("WAITING") // WAITING, NOTIFIED, COMPLETED, CANCELLED, EXPIRED
   createdAt     DateTime  @default(now())
   notifiedAt    DateTime? // 알림 발송 시간
@@ -119,19 +119,19 @@ model WaitingQueue {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
 
+  @@unique([equipmentId, userId, status], name: "unique_active_queue") // 같은 기구에 중복 대기 방지
   @@index([equipmentId, queuePosition])
   @@index([equipmentId, status])
-  @@unique([equipmentId, userId, status], name: "unique_active_queue") // 같은 기구에 중복 대기 방지
 }
 
 // 🆕 운동 루틴 모델
 model WorkoutRoutine {
-  id          Int      @id @default(autoincrement())
-  userId      Int
-  name        String
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   exercises RoutineExercise[]
@@ -141,13 +141,13 @@ model WorkoutRoutine {
 
 // 🆕 루틴 내 운동 항목 모델
 model RoutineExercise {
-  id          Int     @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   routineId   Int
   equipmentId Int
-  order       Int     // 루틴 내 순서
-  targetSets  Int     @default(3)
+  order       Int // 루틴 내 순서
+  targetSets  Int      @default(3)
   targetReps  String? // "8-12" 또는 "10" 형태
-  restMinutes Int     @default(3)
+  restMinutes Int      @default(3)
   notes       String? // 개인 메모 (무게, 특이사항 등)
   createdAt   DateTime @default(now())
 
