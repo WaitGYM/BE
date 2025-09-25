@@ -39,7 +39,7 @@
 - `GET /api/favorites` - 내 즐겨찾기 목록
 - `POST /api/favorites/:equipmentId` - 즐겨찾기 추가
 - `DELETE /api/favorites/equipment/:equipmentId` - 즐겨찾기 제거
-- `GET /api/favorites/check/:equipmentId` - 즐겨찾기 상태 확인
+- `GET /api/favorites/check/:equipmentId` - 즐겨찾기 상태 확인(기구)
 
 
 ### ⏰ 수정된 Waiting System API (웨이팅 시스템)
@@ -60,8 +60,8 @@
 
 **📋 운동 루틴(루틴 API는 모두 JWT 인증 필요):**
 - `GET /api/routines` - 내 운동 루틴 목록 조회(필요에 따라 활성/비활성 필터)
-- `GET /api/routines/:id - 특정 루틴 상세 조회(포함된 운동 목록 등)
-- `POST /api/routines/:id` - 새로운 운동 루틴 생성 (이름, 구성, 활성 여부 변경)
+- `GET /api/routines/:id` - 특정 루틴 상세 조회(포함된 운동 목록 등)
+- `POST /api/routines` - 새로운 운동 루틴 생성 (이름, 구성)
 - `PUT /api/routines/:id` - 운동 루틴 수정(이름, 구성, 활성여부 변경)
 - `DELETE /api/routines/:id` - 운동 루틴 삭제
 - `POST /api/routines/:routineId/exercises/:exerciseId/start` - 루틴의 특정 운동 즉시 시작(기구 사용시작)
