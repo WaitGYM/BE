@@ -41,7 +41,7 @@
 - `DELETE /api/favorites/equipment/:equipmentId` - 즐겨찾기 제거
 - `GET /api/favorites/check/:equipmentId` - 즐겨찾기 상태 확인
 
-### 📅 Reservations API (기존 예약 시스템) => 제거할 항
+### 📅 Reservations API (기존 예약 시스템) => 제거할 테이블
 - `POST /api/reservations` - 예약 생성
 - `GET /api/reservations/me` - 내 예약 목록
 - `GET /api/reservations/:id` - 특정 예약 상세 조회
