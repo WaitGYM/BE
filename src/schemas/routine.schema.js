@@ -4,7 +4,7 @@ const routineExercise = z.object({
   equipmentId: z.number().int().positive(),
   targetSets: z.number().int().min(1).max(20).default(3),
   targetReps: z.string().optional(),
-  restMinutes: z.number().int().min(0).max(15).default(3),
+  restSeconds: z.number().int().min(0).max(900).default(180),
   notes: z.string().optional(),
 });
 

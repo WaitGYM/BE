@@ -19,6 +19,8 @@
 - **실시간 알림**: WebSocket을 통한 즉시 알림
 
 ## Backend API 문서
+### 👉수정 혹은 추가된 API
+-
 ### 🔑 Auth API
 - `GET /api/auth/google` - Google OAuth 로그인 시작
 - `GET /api/auth/google/callback` - OAuth 콜백 처리
