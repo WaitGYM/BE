@@ -33,18 +33,30 @@ router.post('/queue/:equipmentId', auth(), asyncRoute(async (req, res) => {
     });
   }
 
-  // 다른 기구 사용 중이면 차단
+  // 🆕 수정된 코드로 교체
   const myUsage = await prisma.equipmentUsage.findFirst({
     where: { userId: req.user.id, status: 'IN_USE' },
     include: { equipment: { select: { name: true } } },
   });
+
   if (myUsage) {
-    return res.status(409).json({
-      error: '이미 다른 기구를 사용 중입니다',
-      currentEquipment: myUsage.equipment.name,
-      equipmentId: myUsage.equipmentId,
-    });
-  }
+    // 같은 기구를 사용 중인 경우만 차단
+    if (myUsage.equipmentId === equipmentId) {
+      return res.status(409).json({
+        error: '현재 사용 중인 기구입니다',
+        message: '사용이 완료된 후 다시 대기할 수 있습니다',
+        currentEquipment: myUsage.equipment.name,
+        equipmentId: myUsage.equipmentId,
+      });
+    }
+    
+    // 다른 기구 사용 중이면 로그만 남기고 허용
+    if (myUsage.setStatus === 'RESTING') {
+      console.log(`User ${req.user.id} queuing for equipment ${equipmentId} while resting on equipment ${myUsage.equipmentId}`);
+    } else if (myUsage.setStatus === 'EXERCISING') {
+      console.log(`User ${req.user.id} queuing for equipment ${equipmentId} while exercising on equipment ${myUsage.equipmentId}`);
+    }
+  }  
 
   // 현재 대기 길이 → 나의 position
   const length = await prisma.waitingQueue.count({
@@ -93,13 +105,29 @@ router.post('/queue/:equipmentId', auth(), asyncRoute(async (req, res) => {
     queueId: queue.id,
   });
 
-  res.status(201).json({
-    message: `${equipment.name} 대기열에 등록되었습니다`,
-    equipmentName: equipment.name,
-    queuePosition: queue.queuePosition,
-    queueId: queue.id,
-    estimatedWaitMinutes,
-  });
+  // 🆕 수정된 코드로 교체
+const response = {
+  message: `${equipment.name} 대기열에 등록되었습니다`,
+  equipmentName: equipment.name,
+  queuePosition: queue.queuePosition,
+  queueId: queue.id,
+  estimatedWaitMinutes,
+};
+
+if (myUsage) {
+  response.warning = {
+    message: myUsage.setStatus === 'RESTING' 
+      ? `현재 ${myUsage.equipment.name}에서 휴식 중입니다. 대기 차례가 오면 알림을 받게 됩니다.`
+      : `현재 ${myUsage.equipment.name}에서 운동 중입니다. 운동 완료 전에 대기 차례가 올 수 있으니 주의하세요.`,
+    currentEquipment: myUsage.equipment.name,
+    currentStatus: myUsage.setStatus,
+    canSwitchEquipment: myUsage.setStatus === 'RESTING'
+  };
+}
+
+res.status(201).json(response);
+
+  
 }));
 
 
@@ -168,8 +196,30 @@ router.post('/start-using/:equipmentId', auth(), asyncRoute(async (req, res) => 
   const currentUsage = await prisma.equipmentUsage.findFirst({ where: { equipmentId, status: 'IN_USE' }, include: { user: true } });
   if (currentUsage) return res.status(409).json({ error: '이미 사용 중', currentUser: currentUsage.user.name, since: currentUsage.startedAt });
 
-  const myUsage = await prisma.equipmentUsage.findFirst({ where: { userId: req.user.id, status: 'IN_USE' }, include: { equipment: true } });
-  if (myUsage) return res.status(409).json({ error: '다른 기구 사용 중', currentEquipment: myUsage.equipment.name, equipmentId: myUsage.equipmentId });
+  // 다른 기구 사용 중이더라도 RESTING이면 대기 허용 (EXERCISING만 차단)
+   const myUsage = await prisma.equipmentUsage.findFirst({
+     where: { userId: req.user.id, status: 'IN_USE' },
+     include: { equipment: { select: { name: true } } },
+   });
+   if (myUsage) {
+     // 같은 기구에 대기 등록은 불허 (이미 사용 중)
+     if (myUsage.equipmentId === equipmentId) {
+       return res.status(409).json({
+         error: '현재 해당 기구를 사용 중입니다',
+         currentEquipment: myUsage.equipment.name,
+         equipmentId: myUsage.equipmentId,
+       });
+     }
+     // 운동 중일 때만 다른 기구 대기 차단
+     if (myUsage.setStatus === 'EXERCISING') {
+       return res.status(409).json({
+         error: '운동 중에는 다른 기구 대기 등록이 불가합니다',
+         currentEquipment: myUsage.equipment.name,
+         equipmentId: myUsage.equipmentId,
+       });
+     }
+     // setStatus === 'RESTING' 이면 통과 → 대기 가능
+   }
 
   const firstInQueue = await prisma.waitingQueue.findFirst({ where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } }, orderBy: { queuePosition: 'asc' } });
   if (firstInQueue && firstInQueue.userId !== req.user.id) return res.status(403).json({ error: '대기 순서가 아님', firstPosition: firstInQueue.queuePosition });
