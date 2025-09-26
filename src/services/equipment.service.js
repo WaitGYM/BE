@@ -28,13 +28,20 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
       prisma.equipmentUsage.findFirst({ where: { userId, status: 'IN_USE' } }),
     ]);
 
-    const today = new Date();
-    const sod = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const completed = await prisma.equipmentUsage.findMany({
-      where: { userId, equipmentId: { in: equipmentIds }, status: 'COMPLETED', endedAt: { gte: sod } },
-      orderBy: { endedAt: 'desc' },
-      include: { user: { select: { name: true } } },
-    });
+    // ✅ endedAt 기준 + KST 자정 경계 + '완료 세션'만
+     const { rangeTodayKST } = require('../utils/time');
+     const { start, end } = rangeTodayKST();
+     const completed = await prisma.equipmentUsage.findMany({
+       where: {
+         userId,
+         equipmentId: { in: equipmentIds },
+         status: 'COMPLETED',
+         setStatus: 'COMPLETED',           // STOPPED 등 제외
+         endedAt: { gte: start, lte: end }, // KST 오늘
+       },
+       orderBy: { endedAt: 'desc' },
+       include: { user: { select: { name: true } } },
+     });
 
     completed.forEach((u) => {
       if (!myCompletedToday.has(u.equipmentId)) {

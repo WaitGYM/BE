@@ -2,7 +2,7 @@ const router = require('express').Router();
 const { auth } = require('../middleware/auth');
 const { authOptional } = require('../utils/authOptional');
 const { getEquipmentStatusInfo } = require('../services/equipment.service');
-const { startOfDay, endOfDay } = require('../utils/time');
+const { startOfDay, endOfDay, rangeTodayKST } = require('../utils/time');
 const asyncRoute = require('../utils/asyncRoute');
 
 const prisma = require('../lib/prisma');
@@ -146,7 +146,10 @@ router.get('/my-completed', auth(), asyncRoute(async (req, res) => {
   const where = { userId: req.user.id, status: 'COMPLETED' };
   if (date) {
     const d = new Date(date);
-    where.endedAt = { gte: startOfDay(d), lte: endOfDay(d) };
+     const { rangeTodayKST } = require('../utils/time');
+     // 날짜 d의 'KST 오늘' 범위를 만들고 싶다면 rangeTodayKST(d) 형태로 확장
+     const { start, end } = rangeTodayKST(d);
+     where.endedAt = { gte: start, lte: end };
   }
 
   const rows = await prisma.equipmentUsage.findMany({
