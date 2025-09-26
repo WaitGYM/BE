@@ -106,14 +106,49 @@ async function notifyNextUser(equipmentId) {
   });
   if (!next) return false;
 
-  await prisma.waitingQueue.update({ where: { id: next.id }, data: { status: 'NOTIFIED', notifiedAt: new Date() } });
+  const userCurrentUsage = await prisma.equipmentUsage.findFirst({
+  where: { userId: next.userId, status: 'IN_USE' },
+  include: { equipment: true }
+});
 
-  sendNotification(next.userId, {
-    type: 'EQUIPMENT_AVAILABLE',
-    title: '기구 사용 가능',
-    message: `${next.equipment.name}을 사용할 차례입니다`,
-    equipmentId, equipmentName: next.equipment.name, queueId: next.id, graceMinutes: 5,
-  });
+await prisma.waitingQueue.update({ 
+  where: { id: next.id }, 
+  data: { status: 'NOTIFIED', notifiedAt: new Date() } 
+});
+
+// 알림 메시지에 현재 상황 반영
+let notificationMessage = `${next.equipment.name}을 사용할 차례입니다`;
+let additionalInfo = {};
+
+if (userCurrentUsage) {
+  if (userCurrentUsage.setStatus === 'RESTING') {
+    notificationMessage = `${next.equipment.name} 사용 차례입니다. (현재 ${userCurrentUsage.equipment.name} 휴식 중)`;
+    additionalInfo.currentEquipmentStatus = {
+      equipmentName: userCurrentUsage.equipment.name,
+      status: 'resting',
+      message: '휴식을 마치고 기구를 전환하세요'
+    };
+  } else if (userCurrentUsage.setStatus === 'EXERCISING') {
+    notificationMessage = `${next.equipment.name} 사용 차례입니다. (현재 ${userCurrentUsage.equipment.name} 운동 중)`;
+    additionalInfo.currentEquipmentStatus = {
+      equipmentName: userCurrentUsage.equipment.name,
+      status: 'exercising',
+      message: '현재 운동을 완료한 후 기구를 전환하세요',
+      warning: '두 기구를 동시에 사용할 수 없습니다'
+    };
+  }
+}
+
+sendNotification(next.userId, {
+  type: 'EQUIPMENT_AVAILABLE',
+  title: '기구 사용 가능',
+  message: notificationMessage,
+  equipmentId, 
+  equipmentName: next.equipment.name, 
+  queueId: next.id, 
+  graceMinutes: 5,
+  ...additionalInfo
+});
 
   broadcastEquipmentStatusChange(equipmentId, {
     type: 'next_user_notified', equipmentName: next.equipment.name, nextUserName: next.user.name, queuePosition: next.queuePosition,

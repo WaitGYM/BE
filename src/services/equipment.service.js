@@ -96,8 +96,7 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
     const myQ = myQueues.find((q) => q.equipmentId === id);
     const isAvailable = !cu;
     const canStart = isAvailable && !myQ && (!myCurrentUsage || myCurrentUsage.equipmentId === id);
-    const canQueue = !isAvailable && !myQ && (!myCurrentUsage || myCurrentUsage.equipmentId === id);
-
+    const canQueue = !isAvailable && !myQ && (!myCurrentUsage || myCurrentUsage.equipmentId !== id);
     const myCompleted = userId ? myCompletedToday.get(id) || null : null;
     const recentCompletion = userId ? recentCompletions.get(id) || null : null;
 
@@ -192,6 +191,10 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
       myQueueId: myQ ? myQ.id : null,  // 🔧 추가: 내 대기열 ID
       canStart: !!userId && canStart,
       canQueue: !!userId && canQueue,
+
+      // 🆕 추가할 필드들
+      isUsingOtherEquipment: !!myCurrentUsage && myCurrentUsage.equipmentId !== id,
+      currentlyUsedEquipmentId: myCurrentUsage?.equipmentId || null,
 
       // 🔧 추가: ETA 정보 (핵심!)
       currentUserETA,           // 현재 사용자 남은 시간 (분)

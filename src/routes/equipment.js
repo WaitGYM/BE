@@ -277,11 +277,19 @@ router.post('/:id/quick-start', auth(), asyncRoute(async (req, res) => {
     });
   }
 
-  const myUsage = await prisma.equipmentUsage.findFirst({
-    where: { userId: req.user.id, status: 'IN_USE' },
-    include: { equipment: { select: { name: true } } },
+  // 🆕 수정된 코드로 교체
+  const myUsage = await prisma.equipmentUsage.findFirst({ 
+    where: { userId: req.user.id, status: 'IN_USE' }, 
+    include: { equipment: { select: { name: true } } } 
   });
-  if (myUsage) return res.status(409).json({ error: '이미 다른 기구를 사용 중입니다', currentEquipment: myUsage.equipment.name, equipmentId: myUsage.equipmentId });
+
+  if (myUsage && myUsage.equipmentId === equipmentId) {
+    return res.status(409).json({ 
+      error: '현재 사용 중인 기구입니다',
+      message: '사용이 완료된 후 다시 대기할 수 있습니다',
+      currentEquipment: myUsage.equipment.name 
+    });
+  }
 
   const firstInQueue = await prisma.waitingQueue.findFirst({
     where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } },
@@ -339,13 +347,26 @@ router.post('/:id/quick-queue', auth(), asyncRoute(async (req, res) => {
   const length = await prisma.waitingQueue.count({ where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } } });
   const queue = await prisma.waitingQueue.create({ data: { equipmentId, userId: req.user.id, queuePosition: length + 1, status: 'WAITING' }, include: { equipment: true, user: { select: { name: true } } } });
 
-  res.status(201).json({
+    // 🆕 수정된 코드로 교체
+  const response = {
     message: `${queue.equipment.name} 대기열에 등록되었습니다`,
     equipmentName: queue.equipment.name,
     queuePosition: queue.queuePosition,
     queueId: queue.id,
     estimatedWaitSeconds: Math.max(300, length * 900),
-  });
+  };
+
+  if (myUsage) {
+    response.warning = {
+      message: myUsage.setStatus === 'RESTING'
+        ? `현재 ${myUsage.equipment.name}에서 휴식 중입니다. 대기 차례가 오면 알림을 받게 됩니다.`
+        : `현재 ${myUsage.equipment.name}에서 운동 중입니다. 두 기구를 동시에 사용할 수 없으니 주의하세요.`,
+      currentEquipment: myUsage.equipment.name,
+      currentStatus: myUsage.setStatus
+    };
+  }
+
+  res.status(201).json(response);
 }));
 
 module.exports = router;
