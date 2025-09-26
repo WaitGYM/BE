@@ -211,7 +211,7 @@ Authorization: Bearer <token> (선택사항)
 
 ### 2.2 기구 검색
 ```
-GET /api/equipment/search?q=벤치&category=가슴&available_only=false
+GET /api/equipment/search?q=스쿼트
 Authorization: Bearer <token> (선택사항)
 ```
 **요청바디**: 없음  
@@ -219,8 +219,87 @@ Authorization: Bearer <token> (선택사항)
 - `q`: 검색어
 - `category`: 카테고리 필터
 - `available_only`: 사용 가능한 기구만 필터링
-
 **응답바디**: 기구 목록 조회와 동일
+```json
+[
+    {
+        "id": 1,
+        "name": "스미스 머신 스쿼트",
+        "imageUrl": null,
+        "category": "다리",
+        "muscleGroup": "대퇴사두근, 둔근, 햄스트링, 내전근",
+        "createdAt": "2025-09-25T08:31:11.403Z",
+        "isFavorite": false,
+        "status": {
+            "isAvailable": true,
+            "equipmentStatus": "available",
+            "statusMessage": "사용 가능",
+            "statusColor": "green",
+            "currentUser": null,
+            "currentUserStartedAt": null,
+            "currentUsageInfo": null,
+            "waitingCount": 0,
+            "myQueuePosition": null,
+            "myQueueStatus": null,
+            "myQueueId": null,
+            "canStart": true,
+            "canQueue": false,
+            "isUsingOtherEquipment": false,
+            "currentlyUsedEquipmentId": null,
+            "currentUserETA": 0,
+            "estimatedWaitMinutes": 0,
+            "queueETAs": [],
+            "averageWaitTime": 0,
+            "completedToday": false,
+            "lastCompletedAt": null,
+            "lastCompletedSets": null,
+            "lastCompletedTotalSets": null,
+            "lastCompletedDurationSeconds": null,
+            "wasFullyCompleted": false,
+            "recentCompletion": null
+        }
+    },
+    {
+        "id": 12,
+        "name": "스쿼트 랙",
+        "imageUrl": null,
+        "category": "다리",
+        "muscleGroup": "대퇴사두근, 둔근, 햄스트링",
+        "createdAt": "2025-09-25T08:31:11.572Z",
+        "isFavorite": false,
+        "status": {
+            "isAvailable": true,
+            "equipmentStatus": "available",
+            "statusMessage": "사용 가능",
+            "statusColor": "green",
+            "currentUser": null,
+            "currentUserStartedAt": null,
+            "currentUsageInfo": null,
+            "waitingCount": 0,
+            "myQueuePosition": null,
+            "myQueueStatus": null,
+            "myQueueId": null,
+            "canStart": true,
+            "canQueue": false,
+            "isUsingOtherEquipment": false,
+            "currentlyUsedEquipmentId": null,
+            "currentUserETA": 0,
+            "estimatedWaitMinutes": 0,
+            "queueETAs": [],
+            "averageWaitTime": 0,
+            "completedToday": false,
+            "lastCompletedAt": null,
+            "lastCompletedSets": null,
+            "lastCompletedTotalSets": null,
+            "lastCompletedDurationSeconds": null,
+            "wasFullyCompleted": false,
+            "recentCompletion": null
+        }
+    }
+]
+```
+
+
 
 ### 2.3 카테고리 목록 조회
 ```
@@ -230,18 +309,81 @@ GET /api/equipment/categories
 **응답바디**:
 ```json
 [
-  {
-    "name": "가슴",
-    "count": 5
-  },
-  {
-    "name": "등",
-    "count": 8
-  }
+    {
+        "name": "가슴",
+        "count": 1
+    },
+    {
+        "name": "다리",
+        "count": 5
+    },
+    {
+        "name": "등",
+        "count": 3
+    },
+    {
+        "name": "어깨",
+        "count": 1
+    },
+    {
+        "name": "유산소",
+        "count": 2
+    }
 ]
 ```
 
 ### 2.4 기구 상태 조회
+```
+GET /api/equipment/:equipmentId
+Authorization: Bearer <token> (선택사항)
+```
+**요청바디**: 없음  
+**쿼리 파라미터**:
+- `equipmentId`: 기구 ID (예: 1)
+
+**응답바디**:
+```json
+{
+    "id": 1,
+    "name": "스미스 머신 스쿼트",
+    "imageUrl": null,
+    "category": "다리",
+    "muscleGroup": "대퇴사두근, 둔근, 햄스트링, 내전근",
+    "createdAt": "2025-09-25T08:31:11.403Z",
+    "isFavorite": false,
+    "favoriteCount": 0,
+    "status": {
+        "isAvailable": true,
+        "equipmentStatus": "available",
+        "statusMessage": "사용 가능",
+        "statusColor": "green",
+        "currentUser": null,
+        "currentUserStartedAt": null,
+        "currentUsageInfo": null,
+        "waitingCount": 0,
+        "myQueuePosition": null,
+        "myQueueStatus": null,
+        "myQueueId": null,
+        "canStart": true,
+        "canQueue": false,
+        "isUsingOtherEquipment": false,
+        "currentlyUsedEquipmentId": null,
+        "currentUserETA": 0,
+        "estimatedWaitMinutes": 0,
+        "queueETAs": [],
+        "averageWaitTime": 0,
+        "completedToday": false,
+        "lastCompletedAt": null,
+        "lastCompletedSets": null,
+        "lastCompletedTotalSets": null,
+        "lastCompletedDurationSeconds": null,
+        "wasFullyCompleted": false,
+        "recentCompletion": null
+    }
+}
+```
+
+### 2.5 기구 여러개 상태 조회
 ```
 GET /api/equipment/status?equipmentIds=1,2,3
 Authorization: Bearer <token> (선택사항)
@@ -253,26 +395,97 @@ Authorization: Bearer <token> (선택사항)
 **응답바디**:
 ```json
 {
-  "1": {
-    "isAvailable": true,
-    "currentUser": null,
-    "waitingCount": 0,
-    "canStart": true,
-    "canQueue": false
-  },
-  "2": {
-    "isAvailable": false,
-    "currentUser": "김철수",
-    "waitingCount": 3,
-    "canStart": false,
-    "canQueue": true
-  }
+    "1": {
+        "isAvailable": true,
+        "equipmentStatus": "available",
+        "statusMessage": "사용 가능",
+        "statusColor": "green",
+        "currentUser": null,
+        "currentUserStartedAt": null,
+        "currentUsageInfo": null,
+        "waitingCount": 0,
+        "myQueuePosition": null,
+        "myQueueStatus": null,
+        "myQueueId": null,
+        "canStart": true,
+        "canQueue": false,
+        "isUsingOtherEquipment": false,
+        "currentlyUsedEquipmentId": null,
+        "currentUserETA": 0,
+        "estimatedWaitMinutes": 0,
+        "queueETAs": [],
+        "averageWaitTime": 0,
+        "completedToday": false,
+        "lastCompletedAt": null,
+        "lastCompletedSets": null,
+        "lastCompletedTotalSets": null,
+        "lastCompletedDurationSeconds": null,
+        "wasFullyCompleted": false,
+        "recentCompletion": null
+    },
+    "2": {
+        "isAvailable": true,
+        "equipmentStatus": "available",
+        "statusMessage": "사용 가능",
+        "statusColor": "green",
+        "currentUser": null,
+        "currentUserStartedAt": null,
+        "currentUsageInfo": null,
+        "waitingCount": 0,
+        "myQueuePosition": null,
+        "myQueueStatus": null,
+        "myQueueId": null,
+        "canStart": true,
+        "canQueue": false,
+        "isUsingOtherEquipment": false,
+        "currentlyUsedEquipmentId": null,
+        "currentUserETA": 0,
+        "estimatedWaitMinutes": 0,
+        "queueETAs": [],
+        "averageWaitTime": 0,
+        "completedToday": false,
+        "lastCompletedAt": null,
+        "lastCompletedSets": null,
+        "lastCompletedTotalSets": null,
+        "lastCompletedDurationSeconds": null,
+        "wasFullyCompleted": false,
+        "recentCompletion": null
+    },
+    "3": {
+        "isAvailable": true,
+        "equipmentStatus": "available",
+        "statusMessage": "사용 가능",
+        "statusColor": "green",
+        "currentUser": null,
+        "currentUserStartedAt": null,
+        "currentUsageInfo": null,
+        "waitingCount": 0,
+        "myQueuePosition": null,
+        "myQueueStatus": null,
+        "myQueueId": null,
+        "canStart": true,
+        "canQueue": false,
+        "isUsingOtherEquipment": false,
+        "currentlyUsedEquipmentId": null,
+        "currentUserETA": 0,
+        "estimatedWaitMinutes": 0,
+        "queueETAs": [],
+        "averageWaitTime": 0,
+        "completedToday": false,
+        "lastCompletedAt": null,
+        "lastCompletedSets": null,
+        "lastCompletedTotalSets": null,
+        "lastCompletedDurationSeconds": null,
+        "wasFullyCompleted": false,
+        "recentCompletion": null
+    }
 }
 ```
 
-### 2.5 완료한 운동 목록 조회
+### 2.6 완료한 운동 목록 조회
 ```
-GET /api/equipment/my-completed?date=2025-01-15&limit=20 // /api/equipment/my-completed만 해도 가능
+GET /api/equipment/my-completed?date=2025-01-15&limit=20 // 
+/api/equipment/my-completed만 해도 가능 & date로 상세 날짜 검색 가능
 Authorization: Bearer <token>
 ```
 **요청바디**: 없음  
@@ -283,26 +496,26 @@ Authorization: Bearer <token>
 **응답바디**:
 ```json
 [
-  {
-    "id": 1,
-    "equipmentId": 1,
-    "equipment": {
-      "id": 1,
-      "name": "벤치프레스",
-      "category": "가슴",
-      "muscleGroup": "대흉근",
-      "imageUrl": "https://image-url.com"
-    },
-    "startedAt": "2025-01-15T10:00:00.000Z",
-    "endedAt": "2025-01-15T10:15:00.000Z",
-    "totalSets": 3,
-    "completedSets": 3,
-    "restMinutes": 3,
-    "setStatus": "COMPLETED",
-    "duration": 15,
-    "isFullyCompleted": true,
-    "wasInterrupted": false
-  }
+    {
+        "id": 15,
+        "equipmentId": 3,
+        "equipment": {
+            "id": 3,
+            "name": "케이블 와이 레이즈",
+            "category": "어깨",
+            "muscleGroup": "삼각근, 승모근",
+            "imageUrl": null
+        },
+        "startedAt": "2025-09-26T22:53:31.975Z",
+        "endedAt": "2025-09-26T22:55:12.653Z",
+        "totalSets": 3,
+        "completedSets": 2,
+        "restSeconds": 60,
+        "setStatus": "STOPPED",
+        "durationSeconds": 101,
+        "isFullyCompleted": false,
+        "wasInterrupted": true
+    }
 ]
 ```
 
@@ -591,55 +804,83 @@ Authorization: Bearer <token>
 **응답바디**:
 ```json
 {
-  "id": 1,
-  "queuePosition": 2,
-  "equipmentId": 1,
-  "equipmentName": "벤치프레스",
-  "status": "WAITING",
-  "estimatedWaitMinutes": 15
+    "message": "스미스 머신 스쿼트 대기열에 등록되었습니다",
+    "equipmentName": "스미스 머신 스쿼트",
+    "queuePosition": 1,
+    "queueId": 8,
+    "estimatedWaitMinutes": 9
 }
 ```
 
-### 4.7 실시간 상태 조회
+### 4.7 대기열 취소
 ```
-GET /api/waiting/status/:equipmentId
+DELETE /api/waiting/queue/:equipmentId
+Authorization: Bearer <token>
 ```
 **요청바디**: 없음  
 **응답바디**:
 ```json
 {
-  "equipmentId": 1,
-  "equipmentName": "벤치프레스",
-  "isAvailable": false,
-  "lastUpdated": "2025-01-15T10:30:00.000Z",
-  "currentUser": {
-    "name": "홍길동",
-    "startedAt": "2025-01-15T10:00:00.000Z",
-    "totalSets": 3,
-    "currentSet": 2,
-    "setStatus": "EXERCISING",
-    "restSeconds": 180,
-    "progress": 67,
-    "setProgress": 45,
-    "estimatedMinutesLeft": 8,
-    "restTimeLeft": 0
-  },
-  "waitingQueue": [
-    {
-      "id": 1,
-      "position": 1,
-      "userName": "김철수",
-      "status": "WAITING",
-      "createdAt": "2025-01-15T10:25:00.000Z",
-      "estimatedWaitMinutes": 10
-    }
-  ],
-  "totalWaiting": 1,
-  "averageWaitTime": 10
+    "message": "스미스 머신 스쿼트 대기열에 등록되었습니다",
+    "equipmentName": "스미스 머신 스쿼트",
+    "queuePosition": 1,
+    "queueId": 8,
+    "estimatedWaitMinutes": 9
 }
 ```
 
-### 4.8 시스템 통계 (관리자용)
+### 4.8 실시간 상태 조회
+```
+GET /api/waiting/status/:equipmentId
+```
+**요청바디**: 없음  (예: 1)
+**응답바디**:
+```json
+{
+    "equipmentId": 1,
+    "equipmentName": "스미스 머신 스쿼트",
+    "status": {
+        "isAvailable": false,
+        "currentUser": "Postman Tester3",
+        "currentUserStartedAt": "2025-09-26T22:44:32.003Z",
+        "currentUsageInfo": {
+            "totalSets": 3,
+            "currentSet": 1,
+            "setStatus": "EXERCISING",
+            "restSeconds": 60,
+            "progress": 33,
+            "estimatedEndAt": "2025-09-26T23:01:32.001Z"
+        },
+        "waitingCount": 1,
+        "myQueuePosition": null,
+        "myQueueStatus": null,
+        "myQueueId": null,
+        "canStart": false,
+        "canQueue": false,
+        "currentUserETA": 8,
+        "estimatedWaitMinutes": 21,
+        "queueETAs": [
+            9
+        ],
+        "averageWaitTime": 9,
+        "completedToday": false,
+        "lastCompletedAt": null,
+        "lastCompletedSets": null,
+        "lastCompletedTotalSets": null,
+        "lastCompletedDurationSeconds": null,
+        "wasFullyCompleted": false,
+        "recentCompletion": null,
+        "equipmentStatus": "in_use",
+        "statusMessage": "Postman Tester3 사용 중",
+        "statusColor": "orange",
+        "isUsingOtherEquipment": false,
+        "currentlyUsedEquipmentId": 1
+    },
+    "updatedAt": "2025-09-26T22:55:39.890Z"
+}
+```
+
+### 4.9 시스템 통계 (관리자용)
 ```
 GET /api/waiting/admin/stats
 Authorization: Bearer <token>
