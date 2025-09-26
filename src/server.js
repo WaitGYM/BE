@@ -6,7 +6,6 @@ const cors = require('cors')
 const session = require('express-session')
 const http = require('http')
 const passport = require('passport')
-const { PrismaClient } = require('@prisma/client')
 
 // Routes 섹션에 추가
 const routineRoutes = require('./routes/routines')
@@ -25,7 +24,7 @@ const { router: waitingRoutes } = require('./routes/waiting')
 
 const app = express()
 const server = http.createServer(app)
-const prisma = new PrismaClient()
+const prisma = require('./lib/prisma')
 
 /** ===================== 운영 안전화 기본 셋업 ===================== */
 app.set('trust proxy', 1) // 프록시 뒤 환경에서 Secure/SameSite 판단 정확
@@ -106,6 +105,7 @@ app.get('/health', (_req, res) => res.json({ ok: true, time: new Date().toISOStr
 
 /** ===================== 라우터 ===================== */
 app.use('/api/auth', authRoutes)
+app.use('/api/auth', require('./routes/dev-auth')) //지울거
 app.use('/api/equipment', equipmentRoutes)
 app.use('/api/favorites', favoriteRoutes)
 app.use('/api/waiting', waitingRoutes) // 웨이팅 시스템

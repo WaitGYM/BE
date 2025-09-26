@@ -1,6 +1,5 @@
-const { PrismaClient } = require('@prisma/client');
-const { calculateRealTimeETA, buildQueueETAs } = require('./waiting.service');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
+const { calculateRealTimeETA, buildQueueETAs } = require('../utils/eta');
 
 // 기구 상태, 내 대기/사용, 오늘 완료 내역, 최근 완료 정보까지 한 번에
 async function getEquipmentStatusInfo(equipmentIds, userId = null) {

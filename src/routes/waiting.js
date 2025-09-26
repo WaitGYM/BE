@@ -1,5 +1,4 @@
 const router = require('express').Router();
-const { PrismaClient } = require('@prisma/client');
 const { auth } = require('../middleware/auth');
 const asyncRoute = require('../utils/asyncRoute');
 const {
@@ -10,7 +9,8 @@ const {
   autoUpdateCount, userUpdateLimiter,
 } = require('../services/waiting.service');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
+
 
 // POST /api/waiting/queue/:equipmentId - 대기열 등록
 router.post('/queue/:equipmentId', auth(), asyncRoute(async (req, res) => {

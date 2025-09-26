@@ -1,6 +1,5 @@
 const router = require('express').Router();
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 const jwt = require('jsonwebtoken');
 const passport = require('passport');
 const asyncRoute = require('../utils/asyncRoute');

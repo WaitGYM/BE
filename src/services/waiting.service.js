@@ -1,5 +1,6 @@
-const { prisma } = require('./equipment.service');
+const prisma = require('../lib/prisma');
 const { sendNotification, broadcastETAUpdate, broadcastEquipmentStatusChange } = require('../websocket');
+const { calculateRealTimeETA, buildQueueETAs } = require('../utils/eta');
 
 const AVG_SET_MIN = 3;            // 세트 평균(분)
 const SETUP_CLEANUP_MIN = 1;      // 세팅/정리(분)
@@ -18,40 +19,6 @@ function checkRateLimit(userId) {
   rec.requestCount++; rec.lastUpdate = now; return { allowed: true };
 }
 
-// ===== ETA =====
-function calculateRealTimeETA(usage) {
-  if (!usage || usage.status !== 'IN_USE') return 0;
-  const now = Date.now();
-  const setMs = AVG_SET_MIN * 60 * 1000;
-  const restMs = (usage.restSeconds || 0) * 1000;
-  const remainingSets = Math.max(0, usage.totalSets - usage.currentSet + 1);
-
-  if (usage.setStatus === 'EXERCISING') {
-    const elapsed = usage.currentSetStartedAt ? now - usage.currentSetStartedAt.getTime() : 0;
-    const currRemain = Math.max(0, setMs - elapsed);
-    const futureWork = (remainingSets - 1) * setMs;
-    const futureRest = (remainingSets - 1) * restMs;
-    return Math.ceil((currRemain + futureWork + futureRest) / 60000);
-  }
-  if (usage.setStatus === 'RESTING') {
-    const restElapsed = usage.restStartedAt ? now - usage.restStartedAt.getTime() : 0;
-    const restRemain = Math.max(0, restMs - restElapsed);
-    const futureWork = remainingSets * setMs;
-    const futureRest = (remainingSets - 1) * restMs;
-    return Math.ceil((restRemain + futureWork + futureRest) / 60000);
-  }
-  return 0;
-}
-
-function buildQueueETAs(currentETA, queue) {
-  const etas = [];
-  let acc = currentETA + SETUP_CLEANUP_MIN;
-  for (let i = 0; i < queue.length; i++) {
-    etas.push(acc);
-    acc += AVG_SET_MIN * 3 + 2 + SETUP_CLEANUP_MIN; // 경험치 기반 보수 추정
-  }
-  return etas;
-}
 
 // ===== Auto Update Registry =====
 const autoUpdateIntervals = new Map();

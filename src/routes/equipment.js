@@ -1,12 +1,11 @@
 const router = require('express').Router();
-const { PrismaClient } = require('@prisma/client');
 const { auth } = require('../middleware/auth');
 const { authOptional } = require('../utils/authOptional');
 const { getEquipmentStatusInfo } = require('../services/equipment.service');
 const { startOfDay, endOfDay } = require('../utils/time');
 const asyncRoute = require('../utils/asyncRoute');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /api/equipment
 router.get('/', asyncRoute(async (req, res) => {
