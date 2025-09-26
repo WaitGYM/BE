@@ -8,6 +8,8 @@ const {
   reorderQueue, notifyNextUser,
   autoUpdateCount, userUpdateLimiter,
 } = require('../services/waiting.service');
+const { authOptional } = require('../utils/authOptional');           // ⬅️ 추가
+const { getEquipmentStatusInfo } = require('../services/equipment.service'); // ⬅️ 추가
 
 const prisma = require('../lib/prisma');
 
@@ -347,34 +349,56 @@ router.get('/status/:equipmentId', asyncRoute(async (req, res) => {
   const equipment = await prisma.equipment.findUnique({ where: { id: equipmentId } });
   if (!equipment) return res.status(404).json({ error: '기구를 찾을 수 없습니다' });
 
-  const [currentUsage, queue] = await Promise.all([
-    prisma.equipmentUsage.findFirst({ where: { equipmentId, status: 'IN_USE' }, include: { user: { select: { name: true } } } }),
-    prisma.waitingQueue.findMany({ where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } }, orderBy: { queuePosition: 'asc' }, include: { user: { select: { name: true } } } }),
-  ]);
+  // ⬇️ 로그인/비로그인 모두 허용: 내 순번/내 ETA 계산을 위해 userId만 추출
+  const { userId } = authOptional(req);
 
-  const currentETA = currentUsage ? calculateRealTimeETA(currentUsage) : 0;
-  const queueETAs = buildQueueETAs(currentETA, queue);
+  // ⬇️ /api/equipment와 동일한 계산 로직 재사용 (관찰자 ETA 포함)
+  const statusMap = await getEquipmentStatusInfo([equipmentId], userId);
+  const computed = statusMap.get(equipmentId) || {};
 
-  let setProgress = null;
-  if (currentUsage && currentUsage.setStatus === 'EXERCISING' && currentUsage.currentSetStartedAt) {
-    const elapsed = Date.now() - currentUsage.currentSetStartedAt.getTime();
-    const estimatedSetTime = 3 * 60 * 1000;
-    setProgress = Math.min(100, Math.round((elapsed / estimatedSetTime) * 100));
-  }
+  // ⬇️ 빈 케이스에서도 키가 항상 존재하도록 기본값 깔고 덮어쓰기
+  const baseStatus = {
+    isAvailable: true,
+    currentUser: null,
+    currentUserStartedAt: null,
+    currentUsageInfo: null,
+    waitingCount: 0,
+    myQueuePosition: null,
+    myQueueStatus: null,
+    myQueueId: null,
+    canStart: false,
+    canQueue: false,
+
+    // ETA 관련 기본값 (핵심!)
+    currentUserETA: 0,
+    estimatedWaitMinutes: 0,  // ✅ 항상 존재
+    queueETAs: [],
+    averageWaitTime: 0,
+
+    // 완료/최근 완료
+    completedToday: false,
+    lastCompletedAt: null,
+    lastCompletedSets: null,
+    lastCompletedTotalSets: null,
+    lastCompletedDurationSeconds: null,
+    wasFullyCompleted: false,
+    recentCompletion: null,
+
+    // 배지용(선택)
+    equipmentStatus: 'available',
+    statusMessage: '사용 가능',
+    statusColor: 'green',
+  };
+
+  const status = { ...baseStatus, ...computed };
+  // (원하면 별칭도 제공)
+  // status.myEstimatedWaitMinutes = status.estimatedWaitMinutes;
 
   res.json({
-    equipmentId, equipmentName: equipment.name, isAvailable: !currentUsage, lastUpdated: new Date(),
-    currentUser: currentUsage ? {
-      name: currentUsage.user.name, startedAt: currentUsage.startedAt, totalSets: currentUsage.totalSets, currentSet: currentUsage.currentSet,
-      setStatus: currentUsage.setStatus, restSeconds: currentUsage.restSeconds,
-      progress: Math.round((currentUsage.currentSet / currentUsage.totalSets) * 100),
-      setProgress, estimatedMinutesLeft: currentETA,
-      restTimeLeft: currentUsage.setStatus === 'RESTING' && currentUsage.restStartedAt
-        ? Math.max(0, Math.ceil((currentUsage.restSeconds * 1000 - (Date.now() - currentUsage.restStartedAt.getTime())) / 1000)) : 0,
-    } : null,
-    waitingQueue: queue.map((q, i) => ({ id: q.id, position: q.queuePosition, userName: q.user.name, status: q.status, createdAt: q.createdAt, notifiedAt: q.notifiedAt, estimatedWaitMinutes: queueETAs[i] || 0 })),
-    totalWaiting: queue.length,
-    averageWaitTime: queue.length ? Math.round(queueETAs.reduce((a, b) => a + b, 0) / queue.length) : 0,
+    equipmentId,
+    equipmentName: equipment.name,
+    status,                              // ✅ 여기서 status.estimatedWaitMinutes 확인 가능
+    updatedAt: new Date().toISOString(),
   });
 }));
 

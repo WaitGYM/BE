@@ -1,5 +1,6 @@
+//src/services/equipment.service.js
 const prisma = require('../lib/prisma');
-const { calculateRealTimeETA, buildQueueETAs } = require('../utils/eta');
+const { calculateRealTimeETA, buildQueueETAs, estimateIfJoinNow } = require('../utils/eta');
 
 // 기구 상태, 내 대기/사용, 오늘 완료 내역, 최근 완료 정보까지 한 번에
 async function getEquipmentStatusInfo(equipmentIds, userId = null) {
@@ -124,6 +125,16 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
         }
       }
     }
+    
+    // ✅ 관찰자(내 대기 없음)도 "지금 줄서면" 기준 ETA 제공
+    if (myEstimatedWaitMinutes == null) {
+      myEstimatedWaitMinutes = estimateIfJoinNow({
+        isAvailable,
+        waitingCount: queueCount,
+        queueETAs,
+        currentETA: currentUserETA,
+      });
+    }
   
     // 🆕 기구 상태 결정 로직
     let equipmentStatus = 'available'; // available | in_use | recently_completed
@@ -211,4 +222,4 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
   return statusMap;
 }
 
-module.exports = { getEquipmentStatusInfo, prisma };
+module.exports = { getEquipmentStatusInfo };
