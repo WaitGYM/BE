@@ -3,6 +3,11 @@
 const AVG_SET_MIN = 3;        // 세트 수행 평균 시간(분)
 const SETUP_CLEANUP_MIN = 1;  // 세팅/정리 시간(분) — 사용자 교체 등
 
+// 한 사람(앞사람) 한 사이클이 차지하는 전형적 블록(분)
+// = (세트수 평균 3 * 세트시간) + 휴식(경험치 2분) + 교체시간
+const TYPICAL_BLOCK_MIN = (AVG_SET_MIN * 3) + 2 + SETUP_CLEANUP_MIN;
+
+
 // 현재 사용자의 남은 시간(분) 계산
 // usage: { status, totalSets, currentSet, setStatus, restSeconds, currentSetStartedAt, restStartedAt, ... }
 function calculateRealTimeETA(usage) {
@@ -45,4 +50,27 @@ function buildQueueETAs(currentETA, queue) {
   return etas;
 }
 
-module.exports = { calculateRealTimeETA, buildQueueETAs, AVG_SET_MIN, SETUP_CLEANUP_MIN };
+/**
+* 관찰자(대기 미등록)가 "지금 줄서면" 시작까지 걸릴 예상 대기시간(분)
+* - 장비가 available이면 0
+* - IN_USE & queue>0: 마지막 대기자의 시작시각 + TYPICAL_BLOCK_MIN
+* - IN_USE & queue=0: 현재사용자 남은시간(currentETA) + 교체시간
+*/
+
+function estimateIfJoinNow({ isAvailable, waitingCount, queueETAs, currentETA }) {
+ if (isAvailable) return 0;
+ if ((waitingCount || 0) > 0) {
+    const tailEta = queueETAs?.[waitingCount - 1] ?? 0;
+    return Math.max(0, Math.ceil(tailEta + TYPICAL_BLOCK_MIN));
+    }
+    return Math.max(0, Math.ceil((currentETA || 0) + SETUP_CLEANUP_MIN));
+}
+
+module.exports = { 
+calculateRealTimeETA, 
+buildQueueETAs, 
+AVG_SET_MIN, 
+SETUP_CLEANUP_MIN,
+TYPICAL_BLOCK_MIN,
+estimateIfJoinNow
+};

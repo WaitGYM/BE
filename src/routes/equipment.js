@@ -33,19 +33,59 @@ router.get('/', asyncRoute(async (req, res) => {
   let statusMap = new Map();
   if (include_status === 'true') statusMap = await getEquipmentStatusInfo(list.map((e) => e.id), userId);
 
-  const response = list.map((e) => ({
-    id: e.id, name: e.name, imageUrl: e.imageUrl, category: e.category, muscleGroup: e.muscleGroup, createdAt: e.createdAt,
-    isFavorite: !!userId && e.favorites.length > 0,
-    ...(include_status === 'true' ? {
-      status: statusMap.get(e.id) || {
-        isAvailable: true, currentUser: null, currentUserStartedAt: null, currentUsageInfo: null,
-        waitingCount: 0, myQueuePosition: null, myQueueStatus: null, canStart: false, canQueue: false,
-        completedToday: false, lastCompletedAt: null, lastCompletedSets: null, lastCompletedDurationSeconds: null, wasFullyCompleted: false,
-      },
-    } : {}),
-  }));
+  const response = list.map((e) => {
+  const baseStatus = {
+    // 기본값(키가 항상 존재하도록)
+    isAvailable: true,
+    currentUser: null,
+    currentUserStartedAt: null,
+    currentUsageInfo: null,
+    waitingCount: 0,
+    myQueuePosition: null,
+    myQueueStatus: null,
+    myQueueId: null,
+    canStart: false,
+    canQueue: false,
 
-  res.json(response);
+    // ETA 관련
+    currentUserETA: 0,
+    estimatedWaitMinutes: 0,
+    queueETAs: [],
+    averageWaitTime: 0,
+
+    // 완료/최근 완료
+    completedToday: false,
+    lastCompletedAt: null,
+    lastCompletedSets: null,
+    lastCompletedTotalSets: null,
+    lastCompletedDurationSeconds: null,
+    wasFullyCompleted: false,
+    recentCompletion: null,
+
+    // 배지용(선택)
+    equipmentStatus: 'available',
+    statusMessage: '사용 가능',
+    statusColor: 'green',
+  };
+
+  const computed = statusMap.get(e.id) || {};
+
+  return {
+    id: e.id,
+    name: e.name,
+    imageUrl: e.imageUrl,
+    category: e.category,
+    muscleGroup: e.muscleGroup,
+    createdAt: e.createdAt,
+    isFavorite: !!userId && e.favorites.length > 0,
+    ...(include_status === 'true'
+      ? { status: { ...baseStatus, ...computed } } // ✅ 기본값 위에 계산값 덮어쓰기
+      : {}),
+  };
+});
+
+res.json(response);
+
 }));
 
 // GET /api/equipment/search
