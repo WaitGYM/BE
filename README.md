@@ -20,7 +20,10 @@
 
 ## Backend API 문서
 ### 👉수정 혹은 추가된 API
--
+- `PUT /api/routines/active-usage/rest-time` - +/- 10초 조정
+- `GET /api/routines/active-usage/status`- 현재 운동 상태 True/False
+- `POST /api/routines/:id/exercises` - 운동 추가/업데이트
+
 ### 🔑 Auth API
 - `GET /api/auth/google` - Google OAuth 로그인 시작
 - `GET /api/auth/google/callback` - OAuth 콜백 처리
@@ -68,6 +71,8 @@
 - `DELETE /api/routines/:id` - 운동 루틴 삭제
 - `POST /api/routines/:routineId/exercises/:exerciseId/start` - 루틴의 특정 운동 즉시 시작(기구 사용시작)
 - `POST /api/routines/:routineId/exercises/:exerciseId/queue` - 루틴의 특정 운동 대기열 등록
+- `PUT /api/routines/active-usage/rest-time` - 휴식타이머 +-10초 간격 조정
+- `GET /api/routines/active-usage/status`- 현재 운동 상태 True/False
 
 # 📋 요청 바디, 응답 바디
 
@@ -117,6 +122,42 @@ Authorization: Bearer <token>
 ```
 
 ## 2. 기구 (Equipment) API
+### 2.0 기구 전체 목록 조회
+GET /api/equipment
+```
+**요청바디**: 없음
+**쿼리 파라미터**:
+{
+        "id": 4,
+        "name": "랫풀다운",
+        "imageUrl": null,
+        "category": "등",
+        "muscleGroup": "광배근, 이두",
+        "createdAt": "2025-09-25T08:31:11.471Z",
+        "isFavorite": false,
+        "status": {
+            "isAvailable": true,
+            "equipmentStatus": "available",
+            "statusMessage": "사용 가능",
+            "statusColor": "green",
+            "currentUser": null,
+            "currentUserStartedAt": null,
+            "currentUsageInfo": null,
+            "waitingCount": 0,
+            "myQueuePosition": null,
+            "myQueueStatus": null,
+            "canStart": false,
+            "canQueue": false,
+            "completedToday": false,
+            "lastCompletedAt": null,
+            "lastCompletedSets": null,
+            "lastCompletedTotalSets": null,
+            "lastCompletedDurationSeconds": null,
+            "wasFullyCompleted": false,
+            "recentCompletion": null
+        }
+    },.... 모든 기구 조회 가능
+```
 
 ### 2.1 기구 목록 조회
 ```
@@ -615,54 +656,235 @@ Authorization: Bearer <token>
 }
 ```
 
-## 5. 루틴 (Routines) API
-
-### 5.1 루틴 목록 조회
-```
-GET /api/routines?isActive=true
-Authorization: Bearer <token>
-```
-**요청바디**: 없음  
-**응답바디**:
+## 5. 루틴 (Routines) API(JWT 필요)
+### 5.1 내 운동 루틴 목록 조회
+GET /api/routines
+**요청바디** : 없음
+**응답바디** : 
 ```json
 [
   {
-    "id": 1,뀜
+    "id": 7,
+    "name": "하체 루틴",
+    "isActive": true,
+    "exerciseCount": 2,
+    "createdAt": "2025-09-25T23:15:28.222Z",
+    "updatedAt": "2025-09-25T23:15:28.222Z",
+    "exercises": [
+      {
+        "id": 8,
+        "routineId": 7,
+        "equipmentId": 1,
+        "order": 1,
+        "targetSets": 3,
+        "targetReps": null,
+        "restSeconds": 180,
+        "notes": null,
+        "createdAt": "2025-09-25T23:15:28.222Z",
+        "equipment": {
+          "id": 1,
+          "name": "스미스 머신 스쿼트",
+          "imageUrl": null,
+          "category": "다리",
+          "muscleGroup": "대퇴사두근, 둔근, 햄스트링, 내전근"
+        }
+      }
+    ]
+  }
+]
 ```
-**요청바디**: 없음  
-**응답바디**:
+
+### 5.2 특정 루틴 상세 조회
+GET /api/routines/:id
+**요청바디** : 없음 path params : id
+**응답바디** : 
 ```json
 {
-  "equipmentId": 1,
-  "equipmentName": "벤치프레스",
-  "isAvailable": false,
-  "lastUpdated": "2025-01-15T10:30:00.000Z",
-  "currentUser": {
-    "name": "홍길동",
-    "startedAt": "2025-01-15T10:00:00.000Z",
-    "totalSets": 3,
-    "currentSet": 2,
-    "setStatus": "EXERCISING",
-    "restSeconds": 180,
-    "progress": 67,
-    "setProgress": 45,
-    "estimatedMinutesLeft": 8,
-    "restTimeLeft": 0
-  },
-  "waitingQueue": [
+  "id": 7,
+  "name": "하체 루틴",
+  "isActive": true,
+  "createdAt": "2025-09-25T23:15:28.222Z",
+  "updatedAt": "2025-09-25T23:15:28.222Z",
+  "exercises": [
     {
-      "id": 1,
-      "position": 1,
-      "userName": "김철수",
-      "status": "WAITING",
-      "createdAt": "2025-01-15T10:25:00.000Z",
-      "estimatedWaitMinutes": 10
+      "id": 8,
+      "order": 1,
+      "targetSets": 3,
+      "targetReps": null,
+      "restSeconds": 180,
+      "notes": null,
+      "equipment": {
+        "id": 1,
+        "name": "스미스 머신 스쿼트",
+        "imageUrl": null,
+        "category": "다리",
+        "muscleGroup": "대퇴사두근, 둔근, 햄스트링, 내전근"
+      },
+      "status": {
+        "isAvailable": false,
+        "currentUser": "홍길동",
+        "currentUserStartedAt": "2025-09-25T23:05:00.000Z",
+        "waitingCount": 2,
+        "myQueuePosition": null,
+        "myQueueStatus": null,
+        "canStart": false,
+        "canQueue": true
+      }
     }
   ],
-  "totalWaiting": 1,
-  "averageWaitTime": 10
+  "currentlyUsing": {
+    "equipmentId": 1,
+    "equipmentName": "스미스 머신 스쿼트"
+  }
 }
 ```
+
+### 5.3 새로운 루틴 생성
+POST /api/routines
+**요청바디** :
+```json 
+{
+  "name": "Postman Test Routine",
+  "exercises": [
+    { "equipmentId": 1, "targetSets": 3, "restSeconds": 180 },
+    { "equipmentId": 2, "targetSets": 4, "restSeconds": 180 }
+  ]
+}
+```
+**응답바디** : (201 created)
+```json
+{
+  "id": 7,
+  "name": "Postman Test Routine",
+  "isActive": true,
+  "exerciseCount": 2,
+  "exercises": [
+    {
+      "id": 8,
+      "routineId": 7,
+      "equipmentId": 1,
+      "order": 1,
+      "targetSets": 3,
+      "targetReps": null,
+      "restSeconds": 180,
+      "notes": null,
+      "createdAt": "2025-09-25T23:15:28.222Z",
+      "equipment": {
+        "id": 1,
+        "name": "스미스 머신 스쿼트",
+        "imageUrl": null,
+        "category": "다리",
+        "muscleGroup": "대퇴사두근, 둔근, 햄스트링, 내전근"
+      }
+    },
+    {
+      "id": 9,
+      "routineId": 7,
+      "equipmentId": 2,
+      "order": 2,
+      "targetSets": 4,
+      "targetReps": null,
+      "restSeconds": 180,
+      "notes": null,
+      "createdAt": "2025-09-25T23:15:28.222Z",
+      "equipment": {
+        "id": 2,
+        "name": "레그 프레스",
+        "imageUrl": null,
+        "category": "다리",
+        "muscleGroup": "대퇴사두근, 둔근, 햄스트링"
+      }
+    }
+  ],
+  "createdAt": "2025-09-25T23:15:28.222Z",
+  "updatedAt": "2025-09-25T23:15:28.222Z"
+}
+```
+### 5.4 루틴 수정
+PUT /api/routines/:id
+**요청바디** : 수정하고 싶은 내용 
+**응답바디** : 
+```json
+{
+  "name": "업데이트된 하체 루틴",
+  "isActive": true,
+  "exercises": [
+    { "equipmentId": 1, "targetSets": 4, "restSeconds": 150, "notes": "스쿼트 템포 느리게" },
+    { "equipmentId": 3, "targetSets": 3, "restSeconds": 180 }
+  ]
+}
+
+```
+### 5.5 루틴 삭제
+DELETE /api/routines
+**요청바디** :  
+**응답바디** : (204 No Content)
+
+### 5.6 특정 운동 즉시 시작
+POST /api/routines/:routineId/exercises/:exerciseId/start
+**요청바디** : 
+```json
+{ "totalSets": 3, "restSeconds": 180 }
+```
+**응답바디** : 
+```json
+{
+  "message": "스미스 머신 스쿼트 사용을 시작했습니다",
+  "equipmentName": "스미스 머신 스쿼트",
+  "totalSets": 3,
+  "restSeconds": 180,
+  "usageId": 7
+}
+
+```
+
+### 5.7 휴식 타이머 +- 10초 조정
+PUT /api/routines/active-usage/rest-time
+**요청바디** : 
+```json
+{ "adjustment": 10 }   // 또는 -10
+```
+**응답바디** : 
+```json
+{
+  "message": "휴식시간이 증가했습니다",
+  "equipmentName": "벤치프레스",
+  "previousRestSeconds": 170,
+  "newRestSeconds": 180,
+  "adjustment": 10,
+  "currentSet": 2,
+  "totalSets": 3,
+  "setStatus": "RESTING"
+}
+
+```
+
+### 5.8 현재 운동 상태 
+GET /api/routines/active-usage/status
+**요청바디** : 없음
+**응답바디** : 
+응답 예시 (활성 X)
+```json
+{ "active": false }
+
+```
+응답 예시 (활성 O)
+```json
+{
+  "active": true,
+  "usageId": 10,
+  "equipmentId": 1,
+  "equipmentName": "벤치프레스",
+  "totalSets": 3,
+  "currentSet": 2,
+  "setStatus": "RESTING",
+  "restSeconds": 180,
+  "restTimeLeft": 75,
+  "setProgress": 0
+}
+
+```
+
 ## 🌐 WebSocket API
 
 ### WebSocket 연결

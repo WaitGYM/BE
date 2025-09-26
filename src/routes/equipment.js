@@ -3,7 +3,7 @@ const { PrismaClient } = require('@prisma/client');
 const { auth } = require('../middleware/auth');
 const { authOptional } = require('../utils/authOptional');
 const { getEquipmentStatusInfo } = require('../services/equipment.service');
-const { startOfDay, endOfDay } = require('../utils/time'); // toMinutes 제거
+const { startOfDay, endOfDay } = require('../utils/time');
 const asyncRoute = require('../utils/asyncRoute');
 
 const prisma = new PrismaClient();
@@ -120,10 +120,8 @@ router.get('/my-completed', auth(), asyncRoute(async (req, res) => {
   const resp = rows.map((u) => ({
     id: u.id, equipmentId: u.equipmentId, equipment: u.equipment,
     startedAt: u.startedAt, endedAt: u.endedAt, totalSets: u.totalSets, completedSets: u.currentSet,
-    // 🔁 분 → 초
     restSeconds: typeof u.restSeconds === 'number' ? u.restSeconds : null,
     setStatus: u.setStatus,
-    // 🔁 분 → 초
     durationSeconds: (u.startedAt && u.endedAt) ? Math.round((u.endedAt - u.startedAt) / 1000) : null,
     isFullyCompleted: u.setStatus === 'COMPLETED',
     wasInterrupted: ['STOPPED', 'FORCE_COMPLETED'].includes(u.setStatus),
@@ -179,7 +177,7 @@ router.get('/my-stats', auth(), asyncRoute(async (req, res) => {
     period,
     totalWorkouts: stats.length,
     totalSets,
-    totalSeconds, // 🔁 분 → 초
+    totalSeconds,
     averageSetsPerWorkout: stats.length ? Math.round(totalSets / stats.length) : 0,
     equipmentStats: Object.values(equipmentStats).sort((a, b) => b.count - a.count),
     categoryStats: Object.entries(categoryStats).map(([category, data]) => ({ category, ...data })).sort((a, b) => b.count - a.count),
@@ -251,6 +249,11 @@ router.post('/:id/quick-start', auth(), asyncRoute(async (req, res) => {
     return res.status(403).json({ error: '대기 순서가 아닙니다', message: '먼저 대기열에 등록해주세요' });
   }
 
+  // 🔥 수정: estimatedEndAt 계산을 초 단위로 통일
+  const workTimeSeconds = totalSets * 5 * 60; // 5분/세트
+  const restTimeSeconds = (totalSets - 1) * restSeconds; // 세트간 휴식
+  const totalDurationSeconds = workTimeSeconds + restTimeSeconds;
+
   const usage = await prisma.$transaction(async (tx) => {
     const newUsage = await tx.equipmentUsage.create({
       data: {
@@ -262,8 +265,7 @@ router.post('/:id/quick-start', auth(), asyncRoute(async (req, res) => {
         setStatus: 'EXERCISING',
         currentSet: 1,
         currentSetStartedAt: new Date(),
-        // restSeconds(초) → 분 환산 → 분을 ms로 변환
-        estimatedEndAt: new Date(Date.now() + ((totalSets * 5) + ((totalSets - 1) * (restSeconds / 60))) * 60 * 1000),
+        estimatedEndAt: new Date(Date.now() + totalDurationSeconds * 1000),
       },
     });
     if (firstInQueue && firstInQueue.userId === req.user.id) {
@@ -300,7 +302,6 @@ router.post('/:id/quick-queue', auth(), asyncRoute(async (req, res) => {
     equipmentName: queue.equipment.name,
     queuePosition: queue.queuePosition,
     queueId: queue.id,
-    // 🔁 분 → 초
     estimatedWaitSeconds: Math.max(300, length * 900),
   });
 }));
