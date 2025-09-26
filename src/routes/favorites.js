@@ -1,10 +1,9 @@
 // src/routes/favorites.js
 const router = require('express').Router();
-const { PrismaClient } = require('@prisma/client');
 const { auth } = require('../middleware/auth');
 const asyncRoute = require('../utils/asyncRoute');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // ───────── 유틸 ─────────
 function parsePositiveInt(value) {

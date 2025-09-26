@@ -1,11 +1,10 @@
 // src/routes/routines.js
 const router = require('express').Router();
-const { PrismaClient } = require('@prisma/client');
 const { auth } = require('../middleware/auth');
 const { createRoutineSchema, updateRoutineSchema, addExerciseSchema } = require('../schemas/routine.schema');
 const asyncRoute = require('../utils/asyncRoute');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /api/routines
 router.get('/', auth(), asyncRoute(async (req, res) => {
