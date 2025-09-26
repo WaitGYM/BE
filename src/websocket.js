@@ -215,12 +215,40 @@ function broadcastETAUpdate(equipmentId, etaData) {
   })
 }
 
-// 기구 상태 변경 브로드캐스트
+// 기구 상태 변경 브로드캐스트 (개선됨)
 function broadcastEquipmentStatusChange(equipmentId, statusData) {
   return broadcastToEquipmentSubscribers(equipmentId, {
     type: 'status_changed',
     data: statusData
   })
+}
+
+// 🆕 운동 완료 브로드캐스트 (특별 처리)
+function broadcastWorkoutCompletion(equipmentId, completionData) {
+  const message = {
+    type: 'workout_completed',
+    equipmentId,
+    data: {
+      ...completionData,
+      showCompletionBadge: true, // 프론트엔드에서 완료 배지 표시 플래그
+      completionDisplayDuration: 300000, // 5분간 표시
+    }
+  }
+
+  // 해당 기구 구독자들에게 브로드캐스트
+  const broadcastCount = broadcastToEquipmentSubscribers(equipmentId, message)
+
+  // 🎉 완료자에게 축하 메시지
+  sendNotification(completionData.userId, {
+    type: 'WORKOUT_COMPLETED',
+    title: '🎉 운동 완료!',
+    message: `${completionData.equipmentName} ${completionData.completedSets}/${completionData.totalSets} 세트 완료`,
+    equipmentId,
+    completionData,
+    celebrationEmoji: completionData.wasFullyCompleted ? '🎉' : '👍'
+  })
+
+  return broadcastCount
 }
 
 // 연결 상태 모니터링 (Ping/Pong)
@@ -361,6 +389,7 @@ module.exports = {
   sendNotification,
   broadcastETAUpdate,
   broadcastEquipmentStatusChange,
+  broadcastWorkoutCompletion, // 🆕 추가
   getWebSocketStats,
   equipmentSubscribers // 디버깅용 export
 }

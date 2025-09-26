@@ -172,12 +172,17 @@ router.post('/start-using/:equipmentId', auth(), asyncRoute(async (req, res) => 
   const firstInQueue = await prisma.waitingQueue.findFirst({ where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } }, orderBy: { queuePosition: 'asc' } });
   if (firstInQueue && firstInQueue.userId !== req.user.id) return res.status(403).json({ error: '대기 순서가 아님', firstPosition: firstInQueue.queuePosition });
 
+  // 🔥 수정: estimatedEndAt 계산을 초 단위로 통일
+  const workTimeSeconds = totalSets * 5 * 60; // 5분/세트
+  const restTimeSeconds = (totalSets - 1) * restSeconds; // 세트간 휴식
+  const totalDurationSeconds = workTimeSeconds + restTimeSeconds;
+
   const usage = await prisma.$transaction(async (tx) => {
     const u = await tx.equipmentUsage.create({
       data: {
         equipmentId, userId: req.user.id, totalSets, currentSet: 1, restSeconds,
         status: 'IN_USE', setStatus: 'EXERCISING', currentSetStartedAt: new Date(),
-        estimatedEndAt: new Date(Date.now() + ((totalSets * 5 * 60) + ((totalSets - 1) * restSeconds)) * 1000),
+        estimatedEndAt: new Date(Date.now() + totalDurationSeconds * 1000),
       },
       include: { equipment: true, user: { select: { name: true } } },
     });
@@ -209,10 +214,25 @@ router.post('/complete-set/:equipmentId', auth(), asyncRoute(async (req, res) =>
 
   const isLastSet = usage.currentSet >= usage.totalSets;
   if (isLastSet) {
-    await prisma.equipmentUsage.update({ where: { id: usage.id }, data: { status: 'COMPLETED', setStatus: 'COMPLETED', endedAt: new Date() } });
+    const completedUsage = await prisma.equipmentUsage.update({ 
+      where: { id: usage.id }, 
+      data: { status: 'COMPLETED', setStatus: 'COMPLETED', endedAt: new Date() },
+      include: { equipment: true, user: { select: { name: true } } }
+    });
 
-    require('../websocket').broadcastEquipmentStatusChange(equipmentId, {
-      type: 'usage_completed', equipmentName: usage.equipment.name, userName: usage.user.name, totalSets: usage.totalSets, completedAt: new Date(),
+    // 🆕 운동 완료 브로드캐스트 (특별 처리)
+    const { broadcastWorkoutCompletion } = require('../websocket');
+    broadcastWorkoutCompletion(equipmentId, {
+      type: 'workout_completed',
+      equipmentName: usage.equipment.name,
+      userName: usage.user.name,
+      userId: req.user.id,
+      totalSets: usage.totalSets,
+      completedSets: usage.currentSet,
+      completedAt: completedUsage.endedAt,
+      durationSeconds: Math.round((completedUsage.endedAt - usage.startedAt) / 1000),
+      wasFullyCompleted: true,
+      completionMessage: `🎉 ${usage.user.name}님이 ${usage.equipment.name} 운동을 완료했습니다!`
     });
 
     stopAutoUpdate(equipmentId);
@@ -253,8 +273,28 @@ router.post('/skip-rest/:equipmentId', auth(), asyncRoute(async (req, res) => {
   const isLastSet = nextSet > usage.totalSets;
 
   if (isLastSet) {
-    await prisma.equipmentUsage.update({ where: { id: usage.id }, data: { status: 'COMPLETED', setStatus: 'COMPLETED', endedAt: new Date() } });
-    require('../websocket').broadcastEquipmentStatusChange(equipmentId, { type: 'usage_completed', equipmentName: usage.equipment.name, userName: usage.user.name, totalSets: usage.totalSets, completedAt: new Date(), wasSkipped: true });
+    const completedUsage = await prisma.equipmentUsage.update({ 
+      where: { id: usage.id }, 
+      data: { status: 'COMPLETED', setStatus: 'COMPLETED', endedAt: new Date() },
+      include: { equipment: true, user: { select: { name: true } } }
+    });
+
+    // 🆕 운동 완료 브로드캐스트
+    const { broadcastWorkoutCompletion } = require('../websocket');
+    broadcastWorkoutCompletion(equipmentId, {
+      type: 'workout_completed',
+      equipmentName: usage.equipment.name,
+      userName: usage.user.name,
+      userId: req.user.id,
+      totalSets: usage.totalSets,
+      completedSets: usage.currentSet,
+      completedAt: completedUsage.endedAt,
+      durationSeconds: Math.round((completedUsage.endedAt - usage.startedAt) / 1000),
+      wasFullyCompleted: true,
+      wasSkipped: true,
+      completionMessage: `🎉 ${usage.user.name}님이 ${usage.equipment.name} 운동을 완료했습니다!`
+    });
+
     stopAutoUpdate(equipmentId);
     setTimeout(() => notifyNextUser(equipmentId), 1000);
     return res.json({ message: `전체 ${usage.totalSets}세트 완료!`, completed: true, skippedRest: true });
@@ -273,8 +313,28 @@ router.post('/stop-exercise/:equipmentId', auth(), asyncRoute(async (req, res) =
   const usage = await prisma.equipmentUsage.findFirst({ where: { equipmentId, userId: req.user.id, status: 'IN_USE' }, include: { equipment: true, user: { select: { name: true } } } });
   if (!usage) return res.status(404).json({ error: '사용 중 아님' });
 
-  await prisma.equipmentUsage.update({ where: { id: usage.id }, data: { status: 'COMPLETED', setStatus: 'STOPPED', endedAt: new Date() } });
-  require('../websocket').broadcastEquipmentStatusChange(equipmentId, { type: 'usage_stopped', equipmentName: usage.equipment.name, userName: usage.user.name, completedSets: usage.currentSet, totalSets: usage.totalSets, stoppedAt: new Date() });
+  const stoppedUsage = await prisma.equipmentUsage.update({ 
+    where: { id: usage.id }, 
+    data: { status: 'COMPLETED', setStatus: 'STOPPED', endedAt: new Date() },
+    include: { equipment: true, user: { select: { name: true } } }
+  });
+
+  // 🆕 운동 중단 브로드캐스트 (완료와 다른 처리)
+  const { broadcastWorkoutCompletion } = require('../websocket');
+  broadcastWorkoutCompletion(equipmentId, {
+    type: 'workout_stopped',
+    equipmentName: usage.equipment.name,
+    userName: usage.user.name,
+    userId: req.user.id,
+    totalSets: usage.totalSets,
+    completedSets: usage.currentSet,
+    stoppedAt: stoppedUsage.endedAt,
+    durationSeconds: Math.round((stoppedUsage.endedAt - usage.startedAt) / 1000),
+    wasFullyCompleted: false,
+    wasInterrupted: true,
+    completionMessage: `${usage.user.name}님이 ${usage.equipment.name} 운동을 중단했습니다`
+  });
+
   require('../websocket').sendNotification(req.user.id, { type: 'EXERCISE_STOPPED', title: '운동 중단', message: `${usage.equipment.name} 운동 중단`, equipmentId });
   stopAutoUpdate(equipmentId);
   setTimeout(() => notifyNextUser(equipmentId), 1000);

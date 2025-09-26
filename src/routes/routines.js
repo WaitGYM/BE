@@ -2,7 +2,7 @@
 const router = require('express').Router();
 const { PrismaClient } = require('@prisma/client');
 const { auth } = require('../middleware/auth');
-const { createRoutineSchema, updateRoutineSchema } = require('../schemas/routine.schema');
+const { createRoutineSchema, updateRoutineSchema, addExerciseSchema } = require('../schemas/routine.schema');
 const asyncRoute = require('../utils/asyncRoute');
 
 const prisma = new PrismaClient();
@@ -38,8 +38,7 @@ router.get('/', auth(), asyncRoute(async (req, res) => {
       order: ex.order,
       targetSets: ex.targetSets,
       targetReps: ex.targetReps,
-      // 🔁 분 → 초
-      restSeconds: ex.restSeconds,
+      restSeconds: ex.restSeconds, // 이미 초 단위
       notes: ex.notes,
       equipment: ex.equipment
     })),
@@ -83,8 +82,7 @@ router.get('/:id', auth(), asyncRoute(async (req, res) => {
       order: ex.order,
       targetSets: ex.targetSets,
       targetReps: ex.targetReps,
-      // 🔁 분 → 초
-      restSeconds: ex.restSeconds,
+      restSeconds: ex.restSeconds, // 이미 초 단위
       notes: ex.notes,
       equipment: ex.equipment,
       status: {
@@ -133,8 +131,7 @@ router.post('/', auth(), asyncRoute(async (req, res) => {
         order: i + 1,
         targetSets: e.targetSets,
         targetReps: e.targetReps,
-        // 🔁 분 → 초
-        restSeconds: e.restSeconds,
+        restSeconds: e.restSeconds, // 이미 초 단위
         notes: e.notes,
       })),
     });
@@ -181,8 +178,7 @@ router.put('/:id', auth(), asyncRoute(async (req, res) => {
             order: i + 1,
             targetSets: e.targetSets ?? 3,
             targetReps: e.targetReps,
-            // 🔁 분 → 초 (기본값 180초)
-            restSeconds: e.restSeconds ?? 180,
+            restSeconds: e.restSeconds ?? 180, // 기본값 180초 (3분)
             notes: e.notes,
           })),
         });
@@ -198,7 +194,122 @@ router.put('/:id', auth(), asyncRoute(async (req, res) => {
   res.json(updated);
 }));
 
-// DELETE /api/routines/:id (변경 없음)
+// 🆕 POST /api/routines/:id/exercises - 루틴에 운동 추가/업데이트
+router.post('/:id/exercises', auth(), asyncRoute(async (req, res) => {
+  const routineId = parseInt(req.params.id, 10);
+  const v = addExerciseSchema.safeParse(req.body);
+  if (!v.success) return res.status(400).json({ error: '입력 데이터가 올바르지 않습니다', details: v.error.issues });
+
+  const { equipmentId, targetSets = 3, targetReps, restSeconds = 180, notes } = v.data;
+
+  // 루틴 소유권 확인
+  const routine = await prisma.workoutRoutine.findFirst({
+    where: { id: routineId, userId: req.user.id }
+  });
+  if (!routine) return res.status(404).json({ error: '루틴을 찾을 수 없습니다' });
+
+  // 기구 존재 확인
+  const equipment = await prisma.equipment.findUnique({ where: { id: equipmentId } });
+  if (!equipment) return res.status(404).json({ error: '기구를 찾을 수 없습니다' });
+
+  const result = await prisma.$transaction(async (tx) => {
+    // 기존 운동이 있는지 확인
+    const existingExercise = await tx.routineExercise.findUnique({
+      where: { routineId_equipmentId: { routineId, equipmentId } }
+    });
+
+    if (existingExercise) {
+      // 기존 운동 업데이트
+      const updatedExercise = await tx.routineExercise.update({
+        where: { id: existingExercise.id },
+        data: { targetSets, targetReps, restSeconds, notes },
+        include: { equipment: true }
+      });
+      return { action: 'updated', exercise: updatedExercise };
+    } else {
+      // 새 운동 추가 - 마지막 순서로
+      const maxOrder = await tx.routineExercise.findFirst({
+        where: { routineId },
+        orderBy: { order: 'desc' },
+        select: { order: true }
+      });
+      
+      const newExercise = await tx.routineExercise.create({
+        data: {
+          routineId,
+          equipmentId,
+          order: (maxOrder?.order || 0) + 1,
+          targetSets,
+          targetReps,
+          restSeconds,
+          notes
+        },
+        include: { equipment: true }
+      });
+      return { action: 'added', exercise: newExercise };
+    }
+  });
+
+  res.status(result.action === 'added' ? 201 : 200).json({
+    message: result.action === 'added' ? '운동이 루틴에 추가되었습니다' : '운동이 업데이트되었습니다',
+    action: result.action,
+    exercise: {
+      id: result.exercise.id,
+      order: result.exercise.order,
+      targetSets: result.exercise.targetSets,
+      targetReps: result.exercise.targetReps,
+      restSeconds: result.exercise.restSeconds,
+      notes: result.exercise.notes,
+      equipment: result.exercise.equipment
+    }
+  });
+}));
+
+// 🆕 PATCH /api/routines/:routineId/exercises/:exerciseId - 개별 운동 수정
+router.patch('/:routineId/exercises/:exerciseId', auth(), asyncRoute(async (req, res) => {
+  const routineId = parseInt(req.params.routineId, 10);
+  const exerciseId = parseInt(req.params.exerciseId, 10);
+  const { targetSets, targetReps, restSeconds, notes } = req.body;
+
+  // 소유권 확인
+  const exercise = await prisma.routineExercise.findFirst({
+    where: { id: exerciseId, routineId, routine: { userId: req.user.id } },
+    include: { equipment: true, routine: true }
+  });
+  if (!exercise) return res.status(404).json({ error: '운동을 찾을 수 없습니다' });
+
+  // 업데이트할 데이터만 필터링
+  const updateData = {};
+  if (targetSets !== undefined) updateData.targetSets = targetSets;
+  if (targetReps !== undefined) updateData.targetReps = targetReps;
+  if (restSeconds !== undefined) updateData.restSeconds = restSeconds;
+  if (notes !== undefined) updateData.notes = notes;
+
+  if (Object.keys(updateData).length === 0) {
+    return res.status(400).json({ error: '업데이트할 데이터가 없습니다' });
+  }
+
+  const updated = await prisma.routineExercise.update({
+    where: { id: exerciseId },
+    data: updateData,
+    include: { equipment: true }
+  });
+
+  res.json({
+    message: '운동이 업데이트되었습니다',
+    exercise: {
+      id: updated.id,
+      order: updated.order,
+      targetSets: updated.targetSets,
+      targetReps: updated.targetReps,
+      restSeconds: updated.restSeconds,
+      notes: updated.notes,
+      equipment: updated.equipment
+    }
+  });
+}));
+
+// DELETE /api/routines/:id
 router.delete('/:id', auth(), asyncRoute(async (req, res) => {
   const routineId = parseInt(req.params.id, 10);
   const routine = await prisma.workoutRoutine.findFirst({ where: { id: routineId, userId: req.user.id } });
@@ -210,7 +321,6 @@ router.delete('/:id', auth(), asyncRoute(async (req, res) => {
 // POST /api/routines/:routineId/exercises/:exerciseId/start
 router.post('/:routineId/exercises/:exerciseId/start', auth(), asyncRoute(async (req, res) => {
   const { routineId, exerciseId } = req.params;
-  // 🔁 분 → 초
   const { totalSets, restSeconds } = req.body;
 
   const exercise = await prisma.routineExercise.findFirst({
@@ -221,7 +331,6 @@ router.post('/:routineId/exercises/:exerciseId/start', auth(), asyncRoute(async 
 
   const equipmentId = exercise.equipmentId;
   const sets = totalSets || exercise.targetSets;
-  // 이미 초 단위
   const restSec = restSeconds ?? exercise.restSeconds;
 
   const currentUsage = await prisma.equipmentUsage.findFirst({ where: { equipmentId, status: 'IN_USE' } });
@@ -234,6 +343,11 @@ router.post('/:routineId/exercises/:exerciseId/start', auth(), asyncRoute(async 
     return res.status(409).json({ error: '이미 다른 기구를 사용 중입니다', currentEquipmentId: myUsage.equipmentId });
   }
 
+  // 🔥 수정: estimatedEndAt 계산을 초 단위로 통일
+  const workTimeSeconds = sets * 5 * 60; // 5분/세트
+  const restTimeSeconds = (sets - 1) * restSec; // 세트간 휴식
+  const totalDurationSeconds = workTimeSeconds + restTimeSeconds;
+
   const usage = await prisma.equipmentUsage.create({
     data: {
       equipmentId,
@@ -244,8 +358,7 @@ router.post('/:routineId/exercises/:exerciseId/start', auth(), asyncRoute(async 
       setStatus: 'EXERCISING',
       currentSet: 1,
       currentSetStartedAt: new Date(),
-      // 내부 계산은 "분" 기준이므로 초 → 분 환산 유지
-      estimatedEndAt: new Date(Date.now() + ((sets * 5) + ((sets - 1) * (restSec / 60))) * 60 * 1000),
+      estimatedEndAt: new Date(Date.now() + totalDurationSeconds * 1000),
     },
   });
 
@@ -253,9 +366,85 @@ router.post('/:routineId/exercises/:exerciseId/start', auth(), asyncRoute(async 
     message: `${exercise.equipment.name} 사용을 시작했습니다`,
     equipmentName: exercise.equipment.name,
     totalSets: sets,
-    // 🔁 응답도 초로
     restSeconds: restSec,
     usageId: usage.id
+  });
+}));
+
+// 🆕 PUT /api/routines/active-usage/rest-time - 진행중인 운동의 휴식시간 조정
+router.put('/active-usage/rest-time', auth(), asyncRoute(async (req, res) => {
+  const { adjustment } = req.body; // +10 또는 -10 (초)
+  
+  if (!adjustment || ![10, -10].includes(adjustment)) {
+    return res.status(400).json({ error: '조정값은 +10 또는 -10이어야 합니다' });
+  }
+
+  const usage = await prisma.equipmentUsage.findFirst({
+    where: { userId: req.user.id, status: 'IN_USE' },
+    include: { equipment: true }
+  });
+
+  if (!usage) {
+    return res.status(404).json({ error: '현재 사용 중인 기구가 없습니다' });
+  }
+
+  // 휴식 중이거나 다음 휴식을 위한 설정 변경
+  const newRestSeconds = Math.max(0, usage.restSeconds + adjustment);
+  
+  const updated = await prisma.equipmentUsage.update({
+    where: { id: usage.id },
+    data: { restSeconds: newRestSeconds }
+  });
+
+  res.json({
+    message: `휴식시간이 ${adjustment > 0 ? '증가' : '감소'}했습니다`,
+    equipmentName: usage.equipment.name,
+    previousRestSeconds: usage.restSeconds,
+    newRestSeconds: newRestSeconds,
+    adjustment: adjustment,
+    currentSet: updated.currentSet,
+    totalSets: updated.totalSets,
+    setStatus: updated.setStatus
+  });
+}));
+
+// 🆕 GET /api/routines/active-usage/status - 현재 사용중인 기구 상태
+router.get('/active-usage/status', auth(), asyncRoute(async (req, res) => {
+  const usage = await prisma.equipmentUsage.findFirst({
+    where: { userId: req.user.id, status: 'IN_USE' },
+    include: { equipment: true }
+  });
+
+  if (!usage) {
+    return res.json({ active: false });
+  }
+
+  // 휴식 남은 시간 계산
+  let restTimeLeft = 0;
+  if (usage.setStatus === 'RESTING' && usage.restStartedAt) {
+    const restElapsed = Date.now() - usage.restStartedAt.getTime();
+    restTimeLeft = Math.max(0, Math.ceil((usage.restSeconds * 1000 - restElapsed) / 1000));
+  }
+
+  // 세트 진행률 계산
+  const setProgress = usage.setStatus === 'EXERCISING' && usage.currentSetStartedAt 
+    ? Math.min(100, Math.round((Date.now() - usage.currentSetStartedAt.getTime()) / (3 * 60 * 1000) * 100))
+    : 0;
+
+  res.json({
+    active: true,
+    usageId: usage.id,
+    equipmentId: usage.equipmentId,
+    equipmentName: usage.equipment.name,
+    totalSets: usage.totalSets,
+    currentSet: usage.currentSet,
+    setStatus: usage.setStatus,
+    restSeconds: usage.restSeconds, // 현재 설정된 휴식시간 (초)
+    restTimeLeft: restTimeLeft, // 현재 휴식 남은시간 (초)
+    progress: Math.round((usage.currentSet / usage.totalSets) * 100),
+    setProgress: setProgress,
+    startedAt: usage.startedAt,
+    estimatedEndAt: usage.estimatedEndAt
   });
 }));
 
