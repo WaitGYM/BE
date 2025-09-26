@@ -1,4 +1,5 @@
 const { PrismaClient } = require('@prisma/client');
+const { calculateRealTimeETA, buildQueueETAs } = require('./waiting.service');
 const prisma = new PrismaClient();
 
 // 기구 상태, 내 대기/사용, 오늘 완료 내역, 최근 완료 정보까지 한 번에
@@ -83,7 +84,8 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
   const statusMap = new Map();
   equipmentIds.forEach((id) => {
     const cu = currentUsages.find((u) => u.equipmentId === id);
-    const queueCount = waitingQueues.filter((q) => q.equipmentId === id).length;
+    const queue = waitingQueues.filter((q) => q.equipmentId === id);
+    const queueCount = queue.length;
     const myQ = myQueues.find((q) => q.equipmentId === id);
     const isAvailable = !cu;
     const canStart = isAvailable && !myQ && (!myCurrentUsage || myCurrentUsage.equipmentId === id);
@@ -92,6 +94,38 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
     const myCompleted = userId ? myCompletedToday.get(id) || null : null;
     const recentCompletion = userId ? recentCompletions.get(id) || null : null;
 
+    // 🔧 추가: 기존 함수들을 활용한 ETA 계산
+    let currentUserETA = 0;
+    let queueETAs = [];
+    let myEstimatedWaitMinutes = null;
+    
+    if (cu) {
+      // 기존 calculateRealTimeETA 함수 사용
+      currentUserETA = calculateRealTimeETA(cu);
+      
+      if (queue.length > 0) {
+        // 기존 buildQueueETAs 함수 사용
+        queueETAs = buildQueueETAs(currentUserETA, queue);
+        
+        // 내가 대기 중이라면 내 예상 대기시간 설정
+        if (myQ) {
+          const myIndex = queue.findIndex(q => q.id === myQ.id);
+          if (myIndex !== -1) {
+            myEstimatedWaitMinutes = queueETAs[myIndex];
+          }
+        }
+      }
+    } else if (queue.length > 0) {
+      // 기구는 비어있지만 대기열이 있는 경우
+      queueETAs = buildQueueETAs(0, queue);
+      if (myQ && queue.length > 0) {
+        const myIndex = queue.findIndex(q => q.id === myQ.id);
+        if (myIndex !== -1) {
+          myEstimatedWaitMinutes = queueETAs[myIndex];
+        }
+      }
+    }
+  
     // 🆕 기구 상태 결정 로직
     let equipmentStatus = 'available'; // available | in_use | recently_completed
     let statusMessage = '사용 가능';
@@ -138,8 +172,16 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
       waitingCount: queueCount,
       myQueuePosition: myQ ? myQ.queuePosition : null,
       myQueueStatus: myQ ? myQ.status : null,
+      myQueueId: myQ ? myQ.id : null,  // 🔧 추가: 내 대기열 ID
       canStart: !!userId && canStart,
       canQueue: !!userId && canQueue,
+
+      // 🔧 추가: ETA 정보 (핵심!)
+      currentUserETA,           // 현재 사용자 남은 시간 (분)
+      estimatedWaitMinutes: myEstimatedWaitMinutes, // 내 예상 대기시간 (분)
+      queueETAs,               // 대기열 전체의 ETA 배열
+      averageWaitTime: queueETAs.length > 0 ? Math.round(queueETAs.reduce((a, b) => a + b, 0) / queueETAs.length) : 0,
+
 
       // 내 완료 기록 (오늘)
       completedToday: !!myCompleted,
