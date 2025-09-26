@@ -452,61 +452,200 @@ router.get('/status/:equipmentId', asyncRoute(async (req, res) => {
   });
 }));
 
-// DELETE /api/waiting/queue/:queueId
+// DELETE /api/waiting/queue/:queueId - 수정된 버전
 router.delete('/queue/:queueId', auth(), asyncRoute(async (req, res) => {
   const queueId = parseInt(req.params.queueId, 10);
-  if (!queueId) return res.status(400).json({ error: '유효한 queueId가 필요합니다' });
+  if (!queueId || isNaN(queueId)) {
+    return res.status(400).json({ error: '유효한 queueId가 필요합니다' });
+  }
 
-  // 대상 큐 조회
+  // 대상 큐 조회 (트랜잭션 시작 전에)
   const q = await prisma.waitingQueue.findUnique({
     where: { id: queueId },
-    include: { equipment: true },
+    include: { 
+      equipment: { select: { id: true, name: true } },
+      user: { select: { id: true, name: true } }
+    },
   });
-  if (!q) return res.status(404).json({ error: '대기열 항목을 찾을 수 없습니다' });
 
-  // 소유자(또는 관리자)만 취소 가능
-  // (관리자 권한 필드가 있다면 req.user.role === 'ADMIN' 같은 체크를 병행)
-  if (q.userId !== req.user.id /* && req.user.role !== 'ADMIN' */) {
-    return res.status(403).json({ error: '본인 대기열만 취소할 수 있습니다' });
+  if (!q) {
+    return res.status(404).json({ error: '대기열 항목을 찾을 수 없습니다' });
+  }
+
+  // 소유자만 취소 가능
+  if (q.userId !== req.user.id) {
+    return res.status(403).json({ error: '본인의 대기열만 취소할 수 있습니다' });
   }
 
   // 활성 상태만 취소 허용
   if (!['WAITING', 'NOTIFIED'].includes(q.status)) {
-    return res.status(409).json({ error: '이미 활성 대기열이 아닙니다', status: q.status });
+    return res.status(409).json({ 
+      error: '취소할 수 없는 상태입니다', 
+      status: q.status,
+      message: q.status === 'COMPLETED' ? '이미 완료된 대기열입니다' : 
+               q.status === 'EXPIRED' ? '이미 만료된 대기열입니다' : 
+               `현재 상태(${q.status})에서는 취소할 수 없습니다`
+    });
   }
 
-  // 상태 비활성화 처리
-  // (스키마 열거형에 CANCELLED가 없다면 EXPIRED를 사용해 비활성화 상태로 둡니다)
-  await prisma.waitingQueue.update({
-    where: { id: queueId },
-    data: { status: 'EXPIRED' },
-  });
+  try {
+    // 트랜잭션으로 안전하게 처리
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. 대기열 상태를 EXPIRED로 변경
+      await tx.waitingQueue.update({
+        where: { id: queueId },
+        data: { 
+          status: 'EXPIRED',
+          // expiredAt: new Date() // 스키마에 이 필드가 없다면 주석 처리
+        },
+      });
 
-  // 포지션 재정렬
-  const remaining = await reorderQueue(q.equipmentId);
+      // 2. 같은 기구의 남은 활성 대기열 조회 및 포지션 재정렬
+      const remainingQueues = await tx.waitingQueue.findMany({
+        where: { 
+          equipmentId: q.equipmentId, 
+          status: { in: ['WAITING', 'NOTIFIED'] },
+          id: { not: queueId }
+        },
+        orderBy: { createdAt: 'asc' },
+      });
 
-  // 내가 NOTIFIED(호출받은 상태)였으면 다음 사람에게 알림
-  if (q.status === 'NOTIFIED') {
-    setTimeout(() => notifyNextUser(q.equipmentId), 500);
+      // 3. 포지션 재정렬
+      for (let i = 0; i < remainingQueues.length; i++) {
+        if (remainingQueues[i].queuePosition !== i + 1) {
+          await tx.waitingQueue.update({ 
+            where: { id: remainingQueues[i].id }, 
+            data: { queuePosition: i + 1 } 
+          });
+        }
+      }
+
+      return {
+        cancelledQueue: q,
+        remainingCount: remainingQueues.length,
+        wasNotified: q.status === 'NOTIFIED'
+      };
+    });
+
+    // 4. 내가 NOTIFIED 상태였다면 다음 사람에게 알림
+    if (result.wasNotified) {
+      setTimeout(() => notifyNextUser(q.equipmentId), 500);
+    }
+
+    // 5. 실시간 브로드캐스트
+    require('../websocket').broadcastEquipmentStatusChange(q.equipmentId, {
+      type: 'queue_cancelled',
+      equipmentName: q.equipment.name,
+      cancelledBy: {
+        userId: req.user.id,
+        userName: q.user.name,
+        isOwner: true
+      },
+      cancelledQueueId: q.id,
+      previousStatus: q.status,
+      remainingWaiting: result.remainingCount,
+      timestamp: new Date().toISOString()
+    });
+
+    // 6. 취소자에게 확인 알림
+    require('../websocket').sendNotification(req.user.id, {
+      type: 'QUEUE_CANCELLED_CONFIRMATION',
+      title: '대기열 취소 완료',
+      message: `${q.equipment.name} 대기가 취소되었습니다`,
+      equipmentId: q.equipmentId,
+      equipmentName: q.equipment.name,
+      previousPosition: q.queuePosition,
+      previousStatus: q.status
+    });
+
+    // 7. 성공 응답
+    res.status(200).json({
+      success: true,
+      message: '대기열이 성공적으로 취소되었습니다',
+      cancelled: {
+        queueId: q.id,
+        equipmentId: q.equipmentId,
+        equipmentName: q.equipment.name,
+        previousPosition: q.queuePosition,
+        previousStatus: q.status,
+        cancelledAt: new Date().toISOString()
+      },
+      remaining: {
+        waitingCount: result.remainingCount,
+        nextUserNotified: result.wasNotified
+      }
+    });
+
+  } catch (error) {
+    console.error('대기열 취소 오류:', error);
+    
+    // 구체적인 에러 메시지 제공
+    if (error.code === 'P2025') {
+      return res.status(404).json({ 
+        error: '대기열을 찾을 수 없습니다',
+        message: '이미 삭제되었거나 존재하지 않는 대기열입니다' 
+      });
+    }
+    
+    if (error.code === 'P2034') {
+      return res.status(409).json({ 
+        error: '동시성 충돌이 발생했습니다',
+        message: '다시 시도해주세요' 
+      });
+    }
+
+    return res.status(500).json({ 
+      error: '대기열 취소 중 오류가 발생했습니다',
+      message: '서버 오류입니다. 잠시 후 다시 시도해주세요'
+    });
+  }
+}));
+
+// 🆕 선택사항: 추가 API (파일 맨 끝, module.exports 위에 추가)
+// GET /api/waiting/my-queues - 내 모든 대기열 조회
+router.get('/my-queues', auth(), asyncRoute(async (req, res) => {
+  const { status } = req.query;
+  
+  const where = { userId: req.user.id };
+  if (status) {
+    where.status = status.includes(',') ? { in: status.split(',') } : status;
   }
 
-  // 실시간 브로드캐스트
-  const { broadcastEquipmentStatusChange } = require('../websocket');
-  broadcastEquipmentStatusChange(q.equipmentId, {
-    type: 'queue_cancelled',
-    equipmentName: q.equipment.name,
-    cancelledQueueId: q.id,
-    remainingWaiting: remaining,
-    cancelledBy: req.user.id,
+  const myQueues = await prisma.waitingQueue.findMany({
+    where,
+    include: {
+      equipment: { select: { id: true, name: true, category: true, imageUrl: true } },
+    },
+    orderBy: [
+      { status: 'asc' },
+      { createdAt: 'desc' }
+    ]
   });
 
-  res.status(200).json({
-    message: '대기열이 취소되었습니다',
-    queueId: q.id,
+  const response = myQueues.map(q => ({
+    id: q.id,
     equipmentId: q.equipmentId,
-    equipmentName: q.equipment.name,
-    prevStatus: q.status,
-    remainingWaiting: remaining,
+    equipment: q.equipment,
+    queuePosition: q.queuePosition,
+    status: q.status,
+    createdAt: q.createdAt,
+    notifiedAt: q.notifiedAt,
+    canCancel: ['WAITING', 'NOTIFIED'].includes(q.status),
+    statusMessage: q.status === 'WAITING' ? `${q.queuePosition}번째 대기 중` :
+                   q.status === 'NOTIFIED' ? '사용 가능 알림됨' :
+                   q.status === 'COMPLETED' ? '사용 완료' :
+                   q.status === 'EXPIRED' ? '대기 취소/만료' : q.status
+  }));
+
+  res.json({
+    queues: response,
+    summary: {
+      total: myQueues.length,
+      waiting: myQueues.filter(q => q.status === 'WAITING').length,
+      notified: myQueues.filter(q => q.status === 'NOTIFIED').length,
+      completed: myQueues.filter(q => q.status === 'COMPLETED').length,
+      expired: myQueues.filter(q => q.status === 'EXPIRED').length,
+    }
   });
 }));
 

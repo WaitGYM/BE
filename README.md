@@ -811,21 +811,53 @@ Authorization: Bearer <token>
     "estimatedWaitMinutes": 9
 }
 ```
-
-### 4.7 대기열 취소
+### 4.6-1 운동하는 중에 다른 기구 대기열 등록
 ```
-DELETE /api/waiting/queue/:equipmentId
+POST /api/waiting/queue/:equipmentId
 Authorization: Bearer <token>
 ```
 **요청바디**: 없음  
 **응답바디**:
 ```json
 {
-    "message": "스미스 머신 스쿼트 대기열에 등록되었습니다",
-    "equipmentName": "스미스 머신 스쿼트",
+    "message": "바벨 벤치 프레스 대기열에 등록되었습니다",
+    "equipmentName": "바벨 벤치 프레스",
     "queuePosition": 1,
-    "queueId": 8,
-    "estimatedWaitMinutes": 9
+    "queueId": 10,
+    "estimatedWaitMinutes": 0,
+    "warning": {
+        "message": "현재 케이블 와이 레이즈에서 운동 중입니다. 운동 완료 전에 대기 차례가 올 수 있으니 주의하세요.",
+        "currentEquipment": "케이블 와이 레이즈",
+        "currentStatus": "EXERCISING",
+        "canSwitchEquipment": false
+    }
+}
+
+```
+
+### 4.7 대기열 취소
+```
+DELETE /api/waiting/queue/:queueId
+Authorization: Bearer <token>
+```
+**요청바디**: 없음  
+**응답바디**:
+```json
+{
+    "success": true,
+    "message": "대기열이 성공적으로 취소되었습니다",
+    "cancelled": {
+        "queueId": 10,
+        "equipmentId": 8,
+        "equipmentName": "바벨 벤치 프레스",
+        "previousPosition": 1,
+        "previousStatus": "NOTIFIED",
+        "cancelledAt": "2025-09-26T23:34:10.430Z"
+    },
+    "remaining": {
+        "waitingCount": 0,
+        "nextUserNotified": true
+    }
 }
 ```
 
