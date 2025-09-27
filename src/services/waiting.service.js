@@ -1,6 +1,7 @@
 const prisma = require('../lib/prisma');
 const { sendNotification, broadcastETAUpdate, broadcastEquipmentStatusChange } = require('../websocket');
 const { calculateRealTimeETA, buildQueueETAs } = require('../utils/eta');
+const { computeCompleteSetSummary } = require('../utils/time');
 
 const AVG_SET_MIN = 3;            // 세트 평균(분)
 const SETUP_CLEANUP_MIN = 1;      // 세팅/정리(분)
@@ -19,6 +20,37 @@ function checkRateLimit(userId) {
   rec.requestCount++; rec.lastUpdate = now; return { allowed: true };
 }
 
+ // ===== Workout Accumulator (메모리 캐시) =====
+ //  - usageId별 '누적 운동시간(초)'을 보관
+ //  - 스키마/엔드포인트 변경 없이 complete-set 응답에 총 소요/총 휴식 제공
+ const WORK_ACC_CACHE = new Map(); // usageId -> number
+ 
+ function initWorkAcc(usageId, initial = 0) {
+   WORK_ACC_CACHE.set(usageId, Math.max(0, Number(initial) || 0));
+ }
+ 
+ function clearWorkAcc(usageId) {
+   WORK_ACC_CACHE.delete(usageId);
+ }
+ 
+ /**
+  * complete-set 직전에 호출해 요약 계산 + 누적 갱신
+  * @param {Object} usage - equipmentUsage 레코드(startedAt,currentSetStartedAt,currentSet 필수)
+  * @param {Date}   [now=new Date()]
+  * @returns {{summary:Object, workAccSec:number}}
+  */
+ function computeSummaryOnComplete(usage, now = new Date()) {
+   const prev = WORK_ACC_CACHE.get(usage.id) || 0;
+   const { summary, workAccSec } = computeCompleteSetSummary({
+     startedAt: usage.startedAt,
+     currentSetStartedAt: usage.currentSetStartedAt,
+     currentSet: usage.currentSet,
+     workAccPrevSec: prev,
+     now,
+   });
+   WORK_ACC_CACHE.set(usage.id, workAccSec);
+   return { summary, workAccSec };
+ }
 
 // ===== Auto Update Registry =====
 const autoUpdateIntervals = new Map();
@@ -174,4 +206,5 @@ module.exports = {
   reorderQueue, notifyNextUser,
   autoUpdateCount: () => autoUpdateIntervals.size,
   userUpdateLimiter,
+  initWorkAcc, clearWorkAcc, computeSummaryOnComplete,
 };
