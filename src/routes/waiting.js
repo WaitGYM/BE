@@ -7,9 +7,11 @@ const {
   startAutoUpdate, stopAutoUpdate,
   reorderQueue, notifyNextUser,
   autoUpdateCount, userUpdateLimiter,
+  initWorkAcc, clearWorkAcc, computeSummaryOnComplete,
 } = require('../services/waiting.service');
-const { authOptional } = require('../utils/authOptional');           // ⬅️ 추가
-const { getEquipmentStatusInfo } = require('../services/equipment.service'); // ⬅️ 추가
+
+const { authOptional } = require('../utils/authOptional');
+const { getEquipmentStatusInfo } = require('../services/equipment.service');
 
 const prisma = require('../lib/prisma');
 
@@ -250,6 +252,8 @@ router.post('/start-using/:equipmentId', auth(), asyncRoute(async (req, res) => 
 
   startAutoUpdate(equipmentId);
 
+  initWorkAcc(usage.id, 0);
+
   res.status(201).json({
     id: usage.id, equipmentId: usage.equipmentId, equipmentName: usage.equipment.name,
     totalSets: usage.totalSets, currentSet: usage.currentSet, setStatus: usage.setStatus, restSeconds: usage.restSeconds,
@@ -263,6 +267,8 @@ router.post('/complete-set/:equipmentId', auth(), asyncRoute(async (req, res) =>
   const usage = await prisma.equipmentUsage.findFirst({ where: { equipmentId, userId: req.user.id, status: 'IN_USE' }, include: { equipment: true, user: { select: { name: true } } } });
   if (!usage) return res.status(404).json({ error: '사용 중 아님' });
   if (usage.setStatus !== 'EXERCISING') return res.status(400).json({ error: 'EXERCISING 상태가 아님', currentStatus: usage.setStatus });
+
+  const { summary } = computeSummaryOnComplete(usage, new Date());
 
   const isLastSet = usage.currentSet >= usage.totalSets;
   if (isLastSet) {
@@ -287,9 +293,12 @@ router.post('/complete-set/:equipmentId', auth(), asyncRoute(async (req, res) =>
       completionMessage: `🎉 ${usage.user.name}님이 ${usage.equipment.name} 운동을 완료했습니다!`
     });
 
+    clearWorkAcc(usage.id);
     stopAutoUpdate(equipmentId);
     setTimeout(() => notifyNextUser(equipmentId), 1000);
-    return res.json({ message: `전체 ${usage.totalSets}세트 완료!`, completed: true });
+    return res.json({
+      message: `전체 ${usage.totalSets}세트 완료!`, completed: true, summary
+    });
   }
 
   await prisma.equipmentUsage.update({ where: { id: usage.id }, data: { setStatus: 'RESTING', restStartedAt: new Date() } });
@@ -311,7 +320,12 @@ router.post('/complete-set/:equipmentId', auth(), asyncRoute(async (req, res) =>
     }, usage.restSeconds * 1000);
   }
 
-  res.json({ message: `${usage.currentSet}/${usage.totalSets} 세트 완료`, setStatus: 'RESTING', restSeconds: usage.restSeconds });
+  res.json({
+    message: `${usage.currentSet}/${usage.totalSets} 세트 완료`,
+    setStatus: 'RESTING',
+    restSeconds: usage.restSeconds,
+    summary
+  });
 }));
 
 // POST /api/waiting/skip-rest/:equipmentId
