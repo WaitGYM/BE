@@ -347,18 +347,33 @@ router.post('/:routineId/exercises/:exerciseId/start', auth(), asyncRoute(async 
   const restTimeSeconds = (sets - 1) * restSec; // 세트간 휴식
   const totalDurationSeconds = workTimeSeconds + restTimeSeconds;
 
-  const usage = await prisma.equipmentUsage.create({
-    data: {
-      equipmentId,
-      userId: req.user.id,
-      totalSets: sets,
-      restSeconds: restSec,
-      status: 'IN_USE',
-      setStatus: 'EXERCISING',
-      currentSet: 1,
-      currentSetStartedAt: new Date(),
-      estimatedEndAt: new Date(Date.now() + totalDurationSeconds * 1000),
-    },
+  const usage = await prisma.$transaction(async (tx) => {
+    // 1) 내 모든 루틴 비활성화
+    await tx.workoutRoutine.updateMany({
+      where: { userId: req.user.id, isActive: true },
+      data: { isActive: false },
+    });
+
+    // 2) 이번에 시작한 루틴 활성화
+    await tx.workoutRoutine.update({
+      where: { id: Number(routineId) },
+      data: { isActive: true, updatedAt: new Date() },
+    });
+
+    // 3) 기구 사용 시작 레코드 생성 (기존 그대로)
+    return tx.equipmentUsage.create({
+      data: {
+        equipmentId,
+        userId: req.user.id,
+        totalSets: sets,
+        restSeconds: restSec,
+        status: 'IN_USE',
+        setStatus: 'EXERCISING',
+        currentSet: 1,
+        currentSetStartedAt: new Date(),
+        estimatedEndAt: new Date(Date.now() + totalDurationSeconds * 1000),
+      },
+    });
   });
 
   res.json({
