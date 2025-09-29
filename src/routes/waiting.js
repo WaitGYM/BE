@@ -8,7 +8,7 @@ const {
   reorderQueue, notifyNextUser,
   autoUpdateCount, userUpdateLimiter,
   initWorkAcc, clearWorkAcc, computeSummaryOnComplete,
-  notifyCurrentUserWaitingCount,
+  notifyCurrentUserWaitingCount, computeStopSummary,
 } = require('../services/waiting.service');
 
 const { authOptional } = require('../utils/authOptional');
@@ -384,9 +384,13 @@ router.post('/stop-exercise/:equipmentId', auth(), asyncRoute(async (req, res) =
   const usage = await prisma.equipmentUsage.findFirst({ where: { equipmentId, userId: req.user.id, status: 'IN_USE' }, include: { equipment: true, user: { select: { name: true } } } });
   if (!usage) return res.status(404).json({ error: '사용 중 아님' });
 
+  // ▶ STOPPED 시점 요약(진행 중 세트 포함)
+  const now = new Date();
+  const stopSummary = computeStopSummary(usage, now);
+
   const stoppedUsage = await prisma.equipmentUsage.update({ 
     where: { id: usage.id }, 
-    data: { status: 'COMPLETED', setStatus: 'STOPPED', endedAt: new Date() },
+    data: { status: 'COMPLETED', setStatus: 'STOPPED', endedAt: now },
     include: { equipment: true, user: { select: { name: true } } }
   });
 
@@ -400,16 +404,33 @@ router.post('/stop-exercise/:equipmentId', auth(), asyncRoute(async (req, res) =
     totalSets: usage.totalSets,
     completedSets: usage.currentSet,
     stoppedAt: stoppedUsage.endedAt,
-    durationSeconds: Math.round((stoppedUsage.endedAt - usage.startedAt) / 1000),
+    durationSeconds: stopSummary.totalDurationSec,
+    workTimeSec: stopSummary.workTimeSec,
+    restTimeSec: stopSummary.restTimeSec,
+    workTime: stopSummary.workTime,
+    restTime: stopSummary.restTime,
+    totalDuration: stopSummary.totalDuration,
     wasFullyCompleted: false,
     wasInterrupted: true,
     completionMessage: `${usage.user.name}님이 ${usage.equipment.name} 운동을 중단했습니다`
   });
 
-  require('../websocket').sendNotification(req.user.id, { type: 'EXERCISE_STOPPED', title: '운동 중단', message: `${usage.equipment.name} 운동 중단`, equipmentId });
+  // ▶ 사용자에게도 요약을 포함한 푸시
+  require('../websocket').sendNotification(req.user.id, {
+    type: 'EXERCISE_STOPPED', 
+    title: '운동 중단', 
+    message: `${usage.equipment.name} 운동 중단`,
+    equipmentId,
+    summary: stopSummary
+    });
+
   stopAutoUpdate(equipmentId);
+  clearWorkAcc(usage.id);
   setTimeout(() => notifyNextUser(equipmentId), 1000);
-  res.json({ message: '운동 중단 완료' });
+  res.json({
+    message: '운동 중단 완료',
+    summary: stopSummary
+  });
 }));
 
 // GET /api/waiting/status/:equipmentId
