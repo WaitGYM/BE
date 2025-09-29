@@ -182,19 +182,19 @@ await prisma.waitingQueue.update({
 });
 
 // 알림 메시지에 현재 상황 반영
-let notificationMessage = `${next.equipment.name}을 사용할 차례입니다`;
+let notificationMessage = `예약한 ${next.equipment.name} 자리가 비었어요`;
 let additionalInfo = {};
 
 if (userCurrentUsage) {
   if (userCurrentUsage.setStatus === 'RESTING') {
-    notificationMessage = `${next.equipment.name} 사용 차례입니다. (현재 ${userCurrentUsage.equipment.name} 휴식 중)`;
+    notificationMessage = `예약한 ${next.equipment.name} 자리가 비었어요. (현재 ${userCurrentUsage.equipment.name} 휴식 중)`;
     additionalInfo.currentEquipmentStatus = {
       equipmentName: userCurrentUsage.equipment.name,
       status: 'resting',
       message: '휴식을 마치고 기구를 전환하세요'
     };
   } else if (userCurrentUsage.setStatus === 'EXERCISING') {
-    notificationMessage = `${next.equipment.name} 사용 차례입니다. (현재 ${userCurrentUsage.equipment.name} 운동 중)`;
+    notificationMessage = `예약한 ${next.equipment.name} 자리가 비었어요. (현재 ${userCurrentUsage.equipment.name} 운동 중)`;
     additionalInfo.currentEquipmentStatus = {
       equipmentName: userCurrentUsage.equipment.name,
       status: 'exercising',
@@ -269,7 +269,7 @@ async function notifyCurrentUserWaitingCount(equipmentId, opts = {}) {
   sendNotification(usage.userId, {
     type: 'WAITING_COUNT',
     title: '대기자 알림',
-    message: `${eq?.name ?? '기구'}에 대기자 ${waitingCount}명`,
+    message: `내 뒤에 기다리는 사람이 ${waitingCount}명 있어요`,
     equipmentId,
     equipmentName: eq?.name ?? '',
     waitingCount,
