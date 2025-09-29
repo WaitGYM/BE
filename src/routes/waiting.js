@@ -8,6 +8,7 @@ const {
   reorderQueue, notifyNextUser,
   autoUpdateCount, userUpdateLimiter,
   initWorkAcc, clearWorkAcc, computeSummaryOnComplete,
+  notifyCurrentUserWaitingCount,
 } = require('../services/waiting.service');
 
 const { authOptional } = require('../utils/authOptional');
@@ -106,6 +107,8 @@ router.post('/queue/:equipmentId', auth(), asyncRoute(async (req, res) => {
     queuePosition: queue.queuePosition,
     queueId: queue.id,
   });
+
+  await notifyCurrentUserWaitingCount(equipmentId); // 대기자 수로 푸시
 
   // 🆕 수정된 코드로 교체
 const response = {
@@ -253,6 +256,8 @@ router.post('/start-using/:equipmentId', auth(), asyncRoute(async (req, res) => 
   startAutoUpdate(equipmentId);
 
   initWorkAcc(usage.id, 0);
+
+  await notifyCurrentUserWaitingCount(equipmentId);
 
   res.status(201).json({
     id: usage.id, equipmentId: usage.equipmentId, equipmentName: usage.equipment.name,
@@ -571,6 +576,8 @@ router.delete('/queue/:queueId', auth(), asyncRoute(async (req, res) => {
       previousPosition: q.queuePosition,
       previousStatus: q.status
     });
+
+    await notifyCurrentUserWaitingCount(q.equipmentId, { sendZero: false });
 
     // 7. 성공 응답
     res.status(200).json({

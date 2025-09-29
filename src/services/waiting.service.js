@@ -2,6 +2,8 @@ const prisma = require('../lib/prisma');
 const { sendNotification, broadcastETAUpdate, broadcastEquipmentStatusChange } = require('../websocket');
 const { calculateRealTimeETA, buildQueueETAs } = require('../utils/eta');
 const { computeCompleteSetSummary } = require('../utils/time');
+//스팸 방지를 위한 메모리 캐시 : 장비별 최근 전송 상태
+const lastWaitNotice = new Map(); // key: equipmentId, value: { count, ts }
 
 const AVG_SET_MIN = 3;            // 세트 평균(분)
 const SETUP_CLEANUP_MIN = 1;      // 세팅/정리(분)
@@ -111,6 +113,7 @@ async function startAutoUpdate(equipmentId) {
   autoUpdateIntervals.set(equipmentId, id);
 }
 
+
 function stopAutoUpdate(equipmentId) {
   const id = autoUpdateIntervals.get(equipmentId);
   if (id) { clearInterval(id); autoUpdateIntervals.delete(equipmentId); }
@@ -199,6 +202,54 @@ sendNotification(next.userId, {
   return true;
 }
 
+// ===== Waiting Count Notifier =====
+async function notifyCurrentUserWaitingCount(equipmentId, opts = {}) {
+  const { sendZero = false, cooldownMs = 60_000 } = opts;
+
+  // 1) 현재 이 기구를 사용 중인 유저 찾기
+  const usage = await prisma.equipmentUsage.findFirst({
+    where: { equipmentId, status: 'IN_USE' },
+    select: { userId: true }
+  });
+  if (!usage) return false; // 사용 중인 유저가 없으면 종료
+
+  // 2) 대기자 수 + 장비 이름 병렬 조회
+  const [waitingCount, eq] = await Promise.all([
+    prisma.waitingQueue.count({
+      where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } }
+    }),
+    prisma.equipment.findUnique({
+      where: { id: equipmentId },
+      select: { name: true }
+    })
+  ]);
+
+  // 3) 0명 알림 비활성 시 스킵
+  if (!sendZero && waitingCount <= 0) return false;
+
+  // 4) 스팸 억제(같은 숫자를 cooldown 내 반복 전송 금지)
+  const now = Date.now();
+  const prev = lastWaitNotice.get(equipmentId);
+  if (prev && prev.count === waitingCount && (now - prev.ts) < cooldownMs) {
+    return false;
+  }
+  lastWaitNotice.set(equipmentId, { count: waitingCount, ts: now });
+
+  // 5) 푸시 전송
+  sendNotification(usage.userId, {
+    type: 'WAITING_COUNT',
+    title: '대기자 알림',
+    message: `${eq?.name ?? '기구'}에 대기자 ${waitingCount}명`,
+    equipmentId,
+    equipmentName: eq?.name ?? '',
+    waitingCount,
+    at: new Date().toISOString()
+  });
+
+  return true;
+}
+
+
 module.exports = {
   RATE_LIMIT, checkRateLimit,
   calculateRealTimeETA, buildQueueETAs,
@@ -207,4 +258,5 @@ module.exports = {
   autoUpdateCount: () => autoUpdateIntervals.size,
   userUpdateLimiter,
   initWorkAcc, clearWorkAcc, computeSummaryOnComplete,
+  notifyCurrentUserWaitingCount,
 };
