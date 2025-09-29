@@ -1,7 +1,7 @@
 const prisma = require('../lib/prisma');
 const { sendNotification, broadcastETAUpdate, broadcastEquipmentStatusChange } = require('../websocket');
 const { calculateRealTimeETA, buildQueueETAs } = require('../utils/eta');
-const { computeCompleteSetSummary } = require('../utils/time');
+const { computeCompleteSetSummary, hms } = require('../utils/time');
 //스팸 방지를 위한 메모리 캐시 : 장비별 최근 전송 상태
 const lastWaitNotice = new Map(); // key: equipmentId, value: { count, ts }
 
@@ -53,6 +53,36 @@ function checkRateLimit(userId) {
    WORK_ACC_CACHE.set(usage.id, workAccSec);
    return { summary, workAccSec };
  }
+
+ /**
+  * STOPPED 시점 요약 계산:
+  * - 완료된 세트의 작업시간: WORK_ACC_CACHE에서 가져옴
+  * - 진행 중 세트의 작업시간: setStatus === 'EXERCISING' 이면 currentSetStartedAt~now 차이 가산
+  * - 휴식시간: 총 소요 - 작업시간
+  */
+ function computeStopSummary(usage, now = new Date()) {
+   const accWork = Math.max(0, Number(WORK_ACC_CACHE.get(usage.id) || 0));
+   const startedAt = usage.startedAt ? new Date(usage.startedAt) : null;
+   const totalDurationSec = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
+ 
+   let inFlightWorkSec = 0;
+   if (usage.setStatus === 'EXERCISING' && usage.currentSetStartedAt) {
+     inFlightWorkSec = Math.max(0, Math.floor((now - new Date(usage.currentSetStartedAt)) / 1000));
+   }
+   const workTimeSec = accWork + inFlightWorkSec;
+   const restTimeSec = Math.max(0, totalDurationSec - workTimeSec);
+ 
+   return {
+     workTimeSec,
+     restTimeSec,
+     totalDurationSec,
+     workTime: hms(workTimeSec),
+     restTime: hms(restTimeSec),
+     totalDuration: hms(totalDurationSec),
+   };
+ }
+
+
 
 // ===== Auto Update Registry =====
 const autoUpdateIntervals = new Map();
@@ -258,5 +288,6 @@ module.exports = {
   autoUpdateCount: () => autoUpdateIntervals.size,
   userUpdateLimiter,
   initWorkAcc, clearWorkAcc, computeSummaryOnComplete,
+  computeStopSummary,
   notifyCurrentUserWaitingCount,
 };
