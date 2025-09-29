@@ -105,6 +105,7 @@ app.get('/health', (_req, res) => res.json({ ok: true, time: new Date().toISOStr
 
 /** ===================== 라우터 ===================== */
 app.use('/api/auth', authRoutes)
+app.use('/api/auth', require('./routes/dev-auth'))
 app.use('/api/equipment', equipmentRoutes)
 app.use('/api/favorites', favoriteRoutes)
 app.use('/api/waiting', waitingRoutes) // 웨이팅 시스템
