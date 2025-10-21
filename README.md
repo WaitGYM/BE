@@ -19,10 +19,12 @@
 - **실시간 알림**: WebSocket을 통한 즉시 알림
 
 ## Backend API 문서
-### 👉수정 혹은 추가된 API
-- `PUT /api/routines/active-usage/rest-time` - +/- 10초 조정
-- `GET /api/routines/active-usage/status`- 현재 운동 상태 True/False
-- `POST /api/routines/:id/exercises` - 운동 추가/업데이트
+### 알람API
+- `GET /api/notifications` - 알림목록조회
+- `GET /api/notifications/unread-count` - 읽지 않은 알림 개수
+- `PATCH /api/notifications/:id/read` - 특정 알림 읽음 처리
+- `PATCH /api/notifications/read` - 여러 특정 알림 읽음 처리
+- `PATCH /api/notifications/read-all` - 모든 알림 읽음 처리
 
 ### 🔑 Auth API
 - `GET /api/auth/google` - Google OAuth 로그인 시작
@@ -75,6 +77,258 @@
 - `GET /api/routines/active-usage/status`- 현재 운동 상태 True/False
 
 # 📋 요청 바디, 응답 바디
+## 0. 알림 리스트 API
+### 0.1 알림목록조회
+```
+GET /api/notifications
+```
+**요청바디**: 없음  Authorization: Bearer <token>
+**응답바디**:
+```json
+{
+    "notifications": [
+        {
+            "id": 3,
+            "userId": 5,
+            "type": "WAITING_COUNT",
+            "category": "eta",
+            "priority": 4,
+            "title": "대기자 알림",
+            "message": "내 뒤에 기다리는 사람이 1명 있어요",
+            "isRead": false,
+            "equipmentId": 18,
+            "equipmentName": "풀업",
+            "queueId": null,
+            "usageId": null,
+            "metadata": {
+                "at": "2025-10-21T00:51:26.532Z",
+                "waitingCount": 1
+            },
+            "createdAt": "2025-10-21T00:51:26.536Z",
+            "readAt": null,
+            "equipment": {
+                "id": 18,
+                "name": "풀업",
+                "category": "등",
+                "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-pullup.png"
+            }
+        },
+        {
+            "id": 2,
+            "userId": 5,
+            "type": "WAITING_COUNT",
+            "category": "eta",
+            "priority": 4,
+            "title": "대기자 알림",
+            "message": "내 뒤에 기다리는 사람이 2명 있어요",
+            "isRead": false,
+            "equipmentId": 18,
+            "equipmentName": "풀업",
+            "queueId": null,
+            "usageId": null,
+            "metadata": {
+                "at": "2025-10-21T00:51:11.113Z",
+                "waitingCount": 2
+            },
+            "createdAt": "2025-10-21T00:51:11.116Z",
+            "readAt": null,
+            "equipment": {
+                "id": 18,
+                "name": "풀업",
+                "category": "등",
+                "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-pullup.png"
+            }
+        },
+        {
+            "id": 1,
+            "userId": 5,
+            "type": "WAITING_COUNT",
+            "category": "eta",
+            "priority": 4,
+            "title": "대기자 알림",
+            "message": "내 뒤에 기다리는 사람이 1명 있어요",
+            "isRead": false,
+            "equipmentId": 18,
+            "equipmentName": "풀업",
+            "queueId": null,
+            "usageId": null,
+            "metadata": {
+                "at": "2025-10-21T00:50:59.821Z",
+                "waitingCount": 1
+            },
+            "createdAt": "2025-10-21T00:50:59.826Z",
+            "readAt": null,
+            "equipment": {
+                "id": 18,
+                "name": "풀업",
+                "category": "등",
+                "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-pullup.png"
+            }
+        }
+    ],
+    "grouped": {
+        "today": {
+            "label": "오늘",
+            "count": 3,
+            "items": [
+                {
+                    "id": 3,
+                    "userId": 5,
+                    "type": "WAITING_COUNT",
+                    "category": "eta",
+                    "priority": 4,
+                    "title": "대기자 알림",
+                    "message": "내 뒤에 기다리는 사람이 1명 있어요",
+                    "isRead": false,
+                    "equipmentId": 18,
+                    "equipmentName": "풀업",
+                    "queueId": null,
+                    "usageId": null,
+                    "metadata": {
+                        "at": "2025-10-21T00:51:26.532Z",
+                        "waitingCount": 1
+                    },
+                    "createdAt": "2025-10-21T00:51:26.536Z",
+                    "readAt": null,
+                    "equipment": {
+                        "id": 18,
+                        "name": "풀업",
+                        "category": "등",
+                        "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-pullup.png"
+                    }
+                },
+                {
+                    "id": 2,
+                    "userId": 5,
+                    "type": "WAITING_COUNT",
+                    "category": "eta",
+                    "priority": 4,
+                    "title": "대기자 알림",
+                    "message": "내 뒤에 기다리는 사람이 2명 있어요",
+                    "isRead": false,
+                    "equipmentId": 18,
+                    "equipmentName": "풀업",
+                    "queueId": null,
+                    "usageId": null,
+                    "metadata": {
+                        "at": "2025-10-21T00:51:11.113Z",
+                        "waitingCount": 2
+                    },
+                    "createdAt": "2025-10-21T00:51:11.116Z",
+                    "readAt": null,
+                    "equipment": {
+                        "id": 18,
+                        "name": "풀업",
+                        "category": "등",
+                        "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-pullup.png"
+                    }
+                },
+                {
+                    "id": 1,
+                    "userId": 5,
+                    "type": "WAITING_COUNT",
+                    "category": "eta",
+                    "priority": 4,
+                    "title": "대기자 알림",
+                    "message": "내 뒤에 기다리는 사람이 1명 있어요",
+                    "isRead": false,
+                    "equipmentId": 18,
+                    "equipmentName": "풀업",
+                    "queueId": null,
+                    "usageId": null,
+                    "metadata": {
+                        "at": "2025-10-21T00:50:59.821Z",
+                        "waitingCount": 1
+                    },
+                    "createdAt": "2025-10-21T00:50:59.826Z",
+                    "readAt": null,
+                    "equipment": {
+                        "id": 18,
+                        "name": "풀업",
+                        "category": "등",
+                        "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-pullup.png"
+                    }
+                }
+            ]
+        },
+        "yesterday": {
+            "label": "어제",
+            "count": 0,
+            "items": []
+        },
+        "thisWeek": {
+            "label": "이번 주",
+            "count": 0,
+            "items": []
+        },
+        "older": {
+            "label": "이전",
+            "count": 0,
+            "items": []
+        }
+    },
+    "totalCount": 3,
+    "unreadCount": 3,
+    "hasMore": false,
+    "pagination": {
+        "limit": 50,
+        "offset": 0
+    }
+}
+```
+### 0.2 읽지 않은 알림 개수
+```
+GET /api/notifications/unread-count
+```
+**요청바디**: 없음  Authorization: Bearer <token>
+**응답바디**:
+```json
+{
+    "unreadCount": 3
+}
+```
+### 0.3 특정 알림 읽음 처리
+```
+ PATCH /api/notifications/:id/read
+```
+**요청바디**: 없음   Authorization: Bearer <token>, 알림 아이디
+**응답바디**:
+```json
+{
+    "message": "알림을 읽음 처리했습니다",
+    "count": 1
+}
+```
+### 0.4 여러 특정 알림 읽음 처리
+```
+PATCH /api/notifications/read
+```
+**요청바디**: Authorization: Bearer <token>
+```json
+{
+   "notificationIds": [1, 2, 3, 4, 5]
+}
+```
+**응답바디**:
+```json
+{
+   "message": "5개의 알림을 읽음 처리했습니다",
+   "count": 5
+}
+```
+### 0.5 모든 알림 읽음 처리
+```
+ PATCH /api/notifications/read-all
+```
+**요청바디**: 없음  Authorization: Bearer <token>
+**응답바디**:
+```json
+Response:
+ {
+ "message": "3개의 알림을 읽음 처리했습니다",
+ "count": 3
+ }
+```
 
 ## 1. 인증 (Auth) API
 
@@ -1278,6 +1532,47 @@ ws.onmessage = (event) => {
   "equipmentId": 1
 }
 ```
+### 알림 리스트 타입 목록
+알림 타입 목록
+1. EQUIPMENT_AVAILABLE (우선순위 10)
+대기한 기구 사용 가능
+카테고리: queue
+ 2. WORKOUT_COMPLETED (우선순위 9)
+운동 완료 축하
+카테고리: workout
+ 3. QUEUE_EXPIRED (우선순위 8)
+대기 시간 초과로 제외
+카테고리: queue
+ 4. EXERCISE_STOPPED (우선순위 7)
+운동 중단
+카테고리: workout
+ 5. QUEUE_CANCELLED_CONFIRMATION (우선순위 6)
+대기 취소 확인
+카테고리: queue
+ 6. REST_STARTED (우선순위 6)
+휴식 시작
+카테고리: workout
+ 7. NEXT_SET_STARTED (우선순위 5)
+다음 세트 시작
+카테고리: workout
+ 8. REST_SKIPPED (우선순위 5)
+휴식 건너뛰기
+카테고리: workout
+ 9. WAITING_COUNT (우선순위 4)
+내 뒤 대기자 수
+카테고리: eta
+ 10. ETA_UPDATED (우선순위 3)
+예상 대기시간 업데이트
+카테고리: eta
+11. AUTO_ETA_UPDATE (우선순위 2)
+자동 ETA 업데이트
+카테고리: eta
+### 알림 리스트 주의사항
+1. 자동 정리: 30일 이상 된 읽은 알림은 자동 삭제됩니다
+2. 최대 조회 기간: 30일까지만 조회 가능합니다
+3. 페이지네이션: 한 번에 최대 100개까지만 조회 가능합니다
+4. 우선순위: 안읽은 알림 → 우선순위 높은 것 → 최신순으로 정렬됩니다
+5. WebSocket: 실시간 알림은 WebSocket으로 전송되며, DB에도 함께 저장됩니다
 
 ## 🚨 에러 처리
 

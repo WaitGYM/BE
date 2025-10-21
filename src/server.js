@@ -21,6 +21,10 @@ const authRoutes = require('./routes/auth')
 const equipmentRoutes = require('./routes/equipment')
 const favoriteRoutes = require('./routes/favorites')
 const { router: waitingRoutes } = require('./routes/waiting')
+const notificationRoutes = require('./routes/notifications')
+
+// 🆕 알림 정리 서비스 import
+const { cleanupOldNotifications } = require('./services/notification.service')
 
 const app = express()
 const server = http.createServer(app)
@@ -109,6 +113,8 @@ app.use('/api/equipment', equipmentRoutes)
 app.use('/api/favorites', favoriteRoutes)
 app.use('/api/waiting', waitingRoutes) // 웨이팅 시스템
 app.use('/api/routines', routineRoutes) //루틴
+app.use('/api/notifications', notificationRoutes) //알림시스템
+
 /** ===================== WebSocket ===================== */
 setupWebSocket(server)
 
@@ -140,7 +146,45 @@ server.listen(PORT, () => {
   console.log(`🚀 서버가 http://localhost:${PORT} 에서 실행 중`)
   console.log(`🔌 WebSocket이 ws://localhost:${PORT}/ws 에서 실행 중`)
   console.log(`📱 실시간 알림 활성화`)
+
+  //알림 자동 정리 작업 시작(매일 자정)
+  scheduleNotificationCleanup()
 })
+/** ===================== 🆕 알림 자동 정리 스케줄러 ===================== */
+function scheduleNotificationCleanup() {
+  // 서버 시작 시 한 번 실행
+  cleanupOldNotifications().catch(err => {
+    console.error('[Notification Cleanup] 초기 정리 실패:', err)
+  })
+  
+  // 매일 자정(KST 기준)에 실행
+  const scheduleDaily = () => {
+    const now = new Date()
+    const kstOffset = 9 * 60 * 60 * 1000 // +09:00
+    const kstNow = new Date(now.getTime() + kstOffset)
+    
+    // 다음 자정까지 남은 시간 계산
+    const tomorrow = new Date(kstNow)
+    tomorrow.setHours(24, 0, 0, 0)
+    const msUntilMidnight = tomorrow.getTime() - kstNow.getTime()
+    
+    setTimeout(() => {
+      cleanupOldNotifications()
+        .then(count => {
+          console.log(`[Notification Cleanup] ${count}개의 오래된 알림 삭제됨`)
+        })
+        .catch(err => {
+          console.error('[Notification Cleanup] 정리 실패:', err)
+        })
+      
+      // 다음 자정 스케줄링
+      scheduleDaily()
+    }, msUntilMidnight)
+  }
+  
+  scheduleDaily()
+  console.log('🧹 알림 자동 정리 스케줄러 시작 (매일 자정 KST)')
+}
 
 /** ===================== 그레이스풀 종료 ===================== */
 function shutdown(signal) {
