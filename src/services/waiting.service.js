@@ -1,7 +1,12 @@
+// src/services/waiting.service.js
 const prisma = require('../lib/prisma');
 const { sendNotification, broadcastETAUpdate, broadcastEquipmentStatusChange } = require('../websocket');
 const { calculateRealTimeETA, buildQueueETAs } = require('../utils/eta');
 const { computeCompleteSetSummary, hms } = require('../utils/time');
+
+// 🆕 알림 저장 서비스 import
+const { saveNotification } = require('./notification.service');
+
 //스팸 방지를 위한 메모리 캐시 : 장비별 최근 전송 상태
 const lastWaitNotice = new Map(); // key: equipmentId, value: { count, ts }
 
@@ -20,6 +25,17 @@ function checkRateLimit(userId) {
   if (now - rec.lastUpdate < RATE_LIMIT.COOLDOWN_MS) return { allowed: false, remainingMs: RATE_LIMIT.COOLDOWN_MS - (now - rec.lastUpdate), reason: 'cooldown' };
   if (rec.requestCount >= RATE_LIMIT.MAX_REQUESTS) return { allowed: false, remainingMs: RATE_LIMIT.WINDOW_MS - (now - rec.lastUpdate), reason: 'rate_limit' };
   rec.requestCount++; rec.lastUpdate = now; return { allowed: true };
+}
+
+// 🆕 알림 전송 + DB 저장 헬퍼 함수
+async function sendAndSaveNotification(userId, payload) {
+  // 1. DB에 저장 (비동기, 실패해도 WebSocket 전송은 계속)
+  saveNotification(userId, payload).catch(err => {
+    console.error('알림 저장 실패 (WebSocket은 전송됨):', err);
+  });
+  
+  // 2. WebSocket으로 실시간 전송
+  return sendNotification(userId, payload);
 }
 
  // ===== Workout Accumulator (메모리 캐시) =====
@@ -82,8 +98,6 @@ function checkRateLimit(userId) {
    };
  }
 
-
-
 // ===== Auto Update Registry =====
 const autoUpdateIntervals = new Map();
 
@@ -126,14 +140,18 @@ async function startAutoUpdate(equipmentId) {
         isAutoUpdate: true,
       });
 
-      queue.forEach((q, i) => sendNotification(q.userId, {
-        type: 'AUTO_ETA_UPDATE',
-        title: 'ETA 자동 업데이트',
-        message: `${currentUsage.equipment.name} 예상 대기시간: ${queueETAs[i]}분`,
-        equipmentId,
-        estimatedWaitMinutes: queueETAs[i],
-        queuePosition: q.queuePosition,
-      }));
+      // 🆕 각 대기자에게 알림 저장 + 전송
+      queue.forEach((q, i) => {
+        sendAndSaveNotification(q.userId, {
+          type: 'AUTO_ETA_UPDATE',
+          title: 'ETA 자동 업데이트',
+          message: `${currentUsage.equipment.name} 예상 대기시간: ${queueETAs[i]}분`,
+          equipmentId,
+          equipmentName: currentUsage.equipment.name,
+          estimatedWaitMinutes: queueETAs[i],
+          queuePosition: q.queuePosition,
+        });
+      });
     } catch (e) {
       console.error('자동 ETA 업데이트 오류:', e);
       stopAutoUpdate(equipmentId);
@@ -142,7 +160,6 @@ async function startAutoUpdate(equipmentId) {
 
   autoUpdateIntervals.set(equipmentId, id);
 }
-
 
 function stopAutoUpdate(equipmentId) {
   const id = autoUpdateIntervals.get(equipmentId);
@@ -172,58 +189,71 @@ async function notifyNextUser(equipmentId) {
   if (!next) return false;
 
   const userCurrentUsage = await prisma.equipmentUsage.findFirst({
-  where: { userId: next.userId, status: 'IN_USE' },
-  include: { equipment: true }
-});
+    where: { userId: next.userId, status: 'IN_USE' },
+    include: { equipment: true }
+  });
 
-await prisma.waitingQueue.update({ 
-  where: { id: next.id }, 
-  data: { status: 'NOTIFIED', notifiedAt: new Date() } 
-});
+  await prisma.waitingQueue.update({ 
+    where: { id: next.id }, 
+    data: { status: 'NOTIFIED', notifiedAt: new Date() } 
+  });
 
-// 알림 메시지에 현재 상황 반영
-let notificationMessage = `예약한 ${next.equipment.name} 자리가 비었어요`;
-let additionalInfo = {};
+  // 알림 메시지에 현재 상황 반영
+  let notificationMessage = `예약한 ${next.equipment.name} 자리가 비었어요`;
+  let additionalInfo = {};
 
-if (userCurrentUsage) {
-  if (userCurrentUsage.setStatus === 'RESTING') {
-    notificationMessage = `예약한 ${next.equipment.name} 자리가 비었어요. (현재 ${userCurrentUsage.equipment.name} 휴식 중)`;
-    additionalInfo.currentEquipmentStatus = {
-      equipmentName: userCurrentUsage.equipment.name,
-      status: 'resting',
-      message: '휴식을 마치고 기구를 전환하세요'
-    };
-  } else if (userCurrentUsage.setStatus === 'EXERCISING') {
-    notificationMessage = `예약한 ${next.equipment.name} 자리가 비었어요. (현재 ${userCurrentUsage.equipment.name} 운동 중)`;
-    additionalInfo.currentEquipmentStatus = {
-      equipmentName: userCurrentUsage.equipment.name,
-      status: 'exercising',
-      message: '현재 운동을 완료한 후 기구를 전환하세요',
-      warning: '두 기구를 동시에 사용할 수 없습니다'
-    };
+  if (userCurrentUsage) {
+    if (userCurrentUsage.setStatus === 'RESTING') {
+      notificationMessage = `예약한 ${next.equipment.name} 자리가 비었어요. (현재 ${userCurrentUsage.equipment.name} 휴식 중)`;
+      additionalInfo.currentEquipmentStatus = {
+        equipmentName: userCurrentUsage.equipment.name,
+        status: 'resting',
+        message: '휴식을 마치고 기구를 전환하세요'
+      };
+    } else if (userCurrentUsage.setStatus === 'EXERCISING') {
+      notificationMessage = `예약한 ${next.equipment.name} 자리가 비었어요. (현재 ${userCurrentUsage.equipment.name} 운동 중)`;
+      additionalInfo.currentEquipmentStatus = {
+        equipmentName: userCurrentUsage.equipment.name,
+        status: 'exercising',
+        message: '현재 운동을 완료한 후 기구를 전환하세요',
+        warning: '두 기구를 동시에 사용할 수 없습니다'
+      };
+    }
   }
-}
 
-sendNotification(next.userId, {
-  type: 'EQUIPMENT_AVAILABLE',
-  title: '기구 사용 가능',
-  message: notificationMessage,
-  equipmentId, 
-  equipmentName: next.equipment.name, 
-  queueId: next.id, 
-  graceMinutes: 5,
-  ...additionalInfo
-});
+  // 🆕 DB 저장 + WebSocket 전송
+  await sendAndSaveNotification(next.userId, {
+    type: 'EQUIPMENT_AVAILABLE',
+    title: '기구 사용 가능',
+    message: notificationMessage,
+    equipmentId,
+    equipmentName: next.equipment.name,
+    queueId: next.id,
+    graceMinutes: 5,
+    ...additionalInfo
+  });
 
   broadcastEquipmentStatusChange(equipmentId, {
-    type: 'next_user_notified', equipmentName: next.equipment.name, nextUserName: next.user.name, queuePosition: next.queuePosition,
+    type: 'next_user_notified',
+    equipmentName: next.equipment.name,
+    nextUserName: next.user.name,
+    queuePosition: next.queuePosition,
   });
 
   setTimeout(async () => {
     const fresh = await prisma.waitingQueue.findUnique({ where: { id: next.id } });
     if (fresh && fresh.status === 'NOTIFIED') {
       await prisma.waitingQueue.update({ where: { id: next.id }, data: { status: 'EXPIRED' } });
-      sendNotification(next.userId, { type: 'QUEUE_EXPIRED', title: '대기 만료', message: '시간 초과로 대기에서 제외되었습니다', equipmentId });
+      
+      // 🆕 만료 알림 저장 + 전송
+      await sendAndSaveNotification(next.userId, {
+        type: 'QUEUE_EXPIRED',
+        title: '대기 만료',
+        message: '시간 초과로 대기에서 제외되었습니다',
+        equipmentId,
+        equipmentName: next.equipment.name,
+      });
+      
       await reorderQueue(equipmentId);
       await notifyNextUser(equipmentId);
     }
@@ -265,8 +295,8 @@ async function notifyCurrentUserWaitingCount(equipmentId, opts = {}) {
   }
   lastWaitNotice.set(equipmentId, { count: waitingCount, ts: now });
 
-  // 5) 푸시 전송
-  sendNotification(usage.userId, {
+  // 🆕 5) DB 저장 + WebSocket 전송
+  await sendAndSaveNotification(usage.userId, {
     type: 'WAITING_COUNT',
     title: '대기자 알림',
     message: `내 뒤에 기다리는 사람이 ${waitingCount}명 있어요`,
@@ -279,15 +309,21 @@ async function notifyCurrentUserWaitingCount(equipmentId, opts = {}) {
   return true;
 }
 
-
 module.exports = {
-  RATE_LIMIT, checkRateLimit,
-  calculateRealTimeETA, buildQueueETAs,
-  startAutoUpdate, stopAutoUpdate,
-  reorderQueue, notifyNextUser,
+  RATE_LIMIT,
+  checkRateLimit,
+  calculateRealTimeETA,
+  buildQueueETAs,
+  startAutoUpdate,
+  stopAutoUpdate,
+  reorderQueue,
+  notifyNextUser,
   autoUpdateCount: () => autoUpdateIntervals.size,
   userUpdateLimiter,
-  initWorkAcc, clearWorkAcc, computeSummaryOnComplete,
+  initWorkAcc,
+  clearWorkAcc,
+  computeSummaryOnComplete,
   computeStopSummary,
   notifyCurrentUserWaitingCount,
+  sendAndSaveNotification, // 🆕 export 추가 (다른 곳에서도 사용 가능)
 };

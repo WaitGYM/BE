@@ -26,6 +26,8 @@ model User {
 
   // 🆕 루틴 시스템 관계
   workoutRoutines WorkoutRoutine[]
+
+  notifications Notification[]
 }
 
 model Equipment {
@@ -43,6 +45,8 @@ model Equipment {
 
   // 🆕 루틴 시스템 관계
   routineExercises RoutineExercise[]
+
+  notifications Notification[]
 }
 
 model Favorite {
@@ -137,4 +141,35 @@ model RoutineExercise {
 
   @@unique([routineId, equipmentId]) // 한 루틴에 같은 기구 중복 방지
   @@index([routineId, order])
+}
+
+model Notification {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  type        String   // EQUIPMENT_AVAILABLE, REST_STARTED, NEXT_SET_STARTED, EXERCISE_STOPPED 등
+  category    String   // queue, workout, eta, other
+  priority    Int      @default(5) // 1-10
+  
+  title       String
+  message     String
+  isRead      Boolean  @default(false)
+  
+  // 관련 정보
+  equipmentId   Int?
+  equipmentName String?
+  queueId       Int?
+  usageId       Int?
+  
+  // 메타데이터 (JSON으로 추가 정보 저장)
+  metadata    Json?
+  
+  createdAt   DateTime @default(now())
+  readAt      DateTime?
+  
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  equipment   Equipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
+  
+  @@index([userId, createdAt])
+  @@index([userId, isRead])
+  @@index([userId, category])
 }
