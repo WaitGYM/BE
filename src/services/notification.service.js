@@ -1,6 +1,6 @@
 // src/services/notification.service.js
-
 const prisma = require('../lib/prisma');
+const eventBus = require('../events/eventBus');
 
 /**
  * 알림 타입별 카테고리 매핑
@@ -48,10 +48,10 @@ async function saveNotification(userId, payload) {
   try {
     const category = NOTIFICATION_CATEGORIES[payload.type] || 'other';
     const priority = NOTIFICATION_PRIORITY[payload.type] || 5;
-    
+
     // 메타데이터 정리 (title, message, type 제외한 나머지)
     const { type, title, message, equipmentId, equipmentName, queueId, ...metadata } = payload;
-    
+
     const notification = await prisma.notification.create({
       data: {
         userId,
@@ -67,7 +67,7 @@ async function saveNotification(userId, payload) {
         metadata: Object.keys(metadata).length > 0 ? metadata : null,
       },
     });
-    
+
     return notification;
   } catch (error) {
     console.error('알림 저장 실패:', error);
@@ -87,30 +87,30 @@ async function getNotifications(userId, options = {}) {
     days = 30,
     equipmentId = undefined,
   } = options;
-  
+
   const where = { userId };
-  
+
   // 읽음/안읽음 필터
   if (isRead !== undefined) {
     where.isRead = isRead;
   }
-  
+
   // 카테고리 필터
   if (category) {
     where.category = category;
   }
-  
+
   // 기구 필터
   if (equipmentId) {
     where.equipmentId = equipmentId;
   }
-  
+
   // 날짜 필터 (최대 30일)
   const maxDays = Math.min(days, 30);
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - maxDays);
   where.createdAt = { gte: startDate };
-  
+
   const [notifications, totalCount, unreadCount] = await Promise.all([
     prisma.notification.findMany({
       where,
@@ -130,7 +130,7 @@ async function getNotifications(userId, options = {}) {
     prisma.notification.count({ where }),
     prisma.notification.count({ where: { ...where, isRead: false } }),
   ]);
-  
+
   return {
     notifications,
     totalCount,
@@ -144,7 +144,7 @@ async function getNotifications(userId, options = {}) {
  */
 async function markAsRead(userId, notificationIds) {
   const ids = Array.isArray(notificationIds) ? notificationIds : [notificationIds];
-  
+
   const result = await prisma.notification.updateMany({
     where: {
       id: { in: ids },
@@ -155,7 +155,7 @@ async function markAsRead(userId, notificationIds) {
       readAt: new Date(),
     },
   });
-  
+
   return result.count;
 }
 
@@ -164,11 +164,11 @@ async function markAsRead(userId, notificationIds) {
  */
 async function markAllAsRead(userId, options = {}) {
   const { category, equipmentId } = options;
+
   const where = { userId, isRead: false };
-  
   if (category) where.category = category;
   if (equipmentId) where.equipmentId = equipmentId;
-  
+
   const result = await prisma.notification.updateMany({
     where,
     data: {
@@ -176,7 +176,7 @@ async function markAllAsRead(userId, options = {}) {
       readAt: new Date(),
     },
   });
-  
+
   return result.count;
 }
 
@@ -186,14 +186,14 @@ async function markAllAsRead(userId, options = {}) {
 async function cleanupOldNotifications() {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  
+
   const result = await prisma.notification.deleteMany({
     where: {
       isRead: true,
       createdAt: { lt: thirtyDaysAgo },
     },
   });
-  
+
   console.log(`${result.count}개의 오래된 알림 삭제됨`);
   return result.count;
 }
@@ -211,7 +211,7 @@ async function getNotificationStats(userId) {
       _count: { id: true },
     }),
   ]);
-  
+
   return {
     totalCount,
     unreadCount,
@@ -223,16 +223,17 @@ async function getNotificationStats(userId) {
 }
 
 /**
- * WebSocket에서 사용할 향상된 sendNotification
- * - DB 저장 + 실시간 전송
+ * 알림 전송 + DB 저장 (이벤트 버스 사용)
+ * WebSocket 의존성 제거 - 이벤트로 발행만 함
  */
 async function sendAndSaveNotification(userId, payload) {
   // 1. DB에 저장
   await saveNotification(userId, payload);
   
-  // 2. WebSocket으로 실시간 전송
-  const { sendNotification: wsSend } = require('../websocket');
-  return wsSend(userId, payload);
+  // 2. 이벤트 발행 (WebSocket은 이벤트를 구독해서 처리)
+  eventBus.emitNotification(userId, payload);
+  
+  return true;
 }
 
 module.exports = {
