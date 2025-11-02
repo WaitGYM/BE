@@ -19,6 +19,9 @@
 - **실시간 알림**: WebSocket을 통한 즉시 알림
 
 ## Backend API 문서
+### 추가API
+- 🆕 `GET /api/equipment/today-total-time` - 오늘 하루 총 운동시간 및 상세 분석
+
 ### 알람API
 - `GET /api/notifications` - 알림목록조회
 - `GET /api/notifications/unread-count` - 읽지 않은 알림 개수
@@ -40,6 +43,7 @@
 - `GET /api/equipment/status?equipmentIds=...` - 여러 기구들의 실시간 상태 정보 조회 (여러 기구의 사용/대기 현황 한번에 확인)
 - `GET /api/equipment/my-completed` - 내가 오늘/지정일에 완료한 운동 목록 조회 (내 사용 이력)
 - `GET /api/equipment/my-stats` - 나의 운동 통계 정보 조회 (주/월/년별 합계 및 분석)
+- 🆕 `GET /api/equipment/today-total-time` - 오늘 하루 총 운동시간 및 상세 분석
 - `POST /api/equipment/:id/quick-start` - 즉시 운동 시작 (해당 기구가 비어 있다면 바로 사용 시작)
 
 ### ⭐ Favorites API
@@ -861,6 +865,102 @@ Authorization: Bearer <token>
   "totalSets": 3,
   "restSeconds": 180,
   "usageId": 1
+}
+```
+
+### 2.9 오늘 총 운동시간 조회
+```
+GET /api/equipment/today-total-time
+Authorization: Bearer <token>
+```
+**요청바디**: 없음
+**응답바디**:
+```json
+{
+    "date": "2025-11-01",
+    "summary": {
+        "totalWorkouts": 2,
+        "totalSets": 6,
+        "totalSeconds": 83,
+        "totalMinutes": 1,
+        "totalHours": "0.02",
+        "totalTimeFormatted": "1분 23초",
+        "averageSetsPerWorkout": 3,
+        "averageSecondsPerWorkout": 42
+    },
+    "workouts": [
+        {
+            "id": 12,
+            "equipmentId": 22,
+            "equipmentName": "트레드밀",
+            "category": "유산소",
+            "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-treadmill.png",
+            "muscleGroup": "전신",
+            "sets": 3,
+            "totalSets": 3,
+            "durationSeconds": 38,
+            "durationFormatted": "38초",
+            "startedAt": "2025-11-02T13:40:30.638Z",
+            "endedAt": "2025-11-02T13:41:08.753Z",
+            "wasFullyCompleted": true,
+            "wasInterrupted": false,
+            "setStatus": "COMPLETED"
+        },
+        {
+            "id": 11,
+            "equipmentId": 19,
+            "equipmentName": "벤치 프레스",
+            "category": "가슴",
+            "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-bench.png",
+            "muscleGroup": "대흉근, 삼두, 어깨",
+            "sets": 3,
+            "totalSets": 3,
+            "durationSeconds": 45,
+            "durationFormatted": "45초",
+            "startedAt": "2025-11-02T13:39:09.160Z",
+            "endedAt": "2025-11-02T13:39:54.458Z",
+            "wasFullyCompleted": true,
+            "wasInterrupted": false,
+            "setStatus": "COMPLETED"
+        }
+    ],
+    "categoryBreakdown": [
+        {
+            "category": "가슴",
+            "count": 1,
+            "totalSets": 3,
+            "totalSeconds": 45,
+            "totalMinutes": 1,
+            "totalTimeFormatted": "45초",
+            "percentage": 54
+        },
+        {
+            "category": "유산소",
+            "count": 1,
+            "totalSets": 3,
+            "totalSeconds": 38,
+            "totalMinutes": 1,
+            "totalTimeFormatted": "38초",
+            "percentage": 46
+        }
+    ],
+    "insights": {
+        "mostUsedEquipment": {
+            "name": "벤치 프레스",
+            "count": 1,
+            "totalTime": "45초"
+        },
+        "mostTrainedCategory": {
+            "category": "가슴",
+            "percentage": 54,
+            "totalTime": "45초"
+        },
+        "longestWorkout": {
+            "equipmentName": "벤치 프레스",
+            "duration": "45초",
+            "sets": 3
+        }
+    }
 }
 ```
 
