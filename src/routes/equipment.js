@@ -12,7 +12,7 @@ const sanitizeUrl = (url) => {
     return null;
   }
 };
-
+const { getTodayWorkoutStats } = require('../services/workout-stats.service');
 const router = require('express').Router();
 const { auth } = require('../middleware/auth');
 const { authOptional } = require('../utils/authOptional');
@@ -302,6 +302,66 @@ router.get('/my-stats', auth(), asyncRoute(async (req, res) => {
       .map(([category, data]) => ({ category, ...data }))
       .sort((a, b) => b.count - a.count),
     recentWorkouts: stats.slice(-5).reverse(),
+  });
+}));
+
+
+// GET /api/equipment/today-total-time - 오늘 하루 총 운동시간 조회
+router.get('/today-total-time', auth(), asyncRoute(async (req, res) => {
+  const userId = req.user.id;
+  
+  // 서비스에서 통계 조회
+  const stats = await getTodayWorkoutStats(userId);
+  
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  
+  // 인사이트 생성
+  const insights = {
+    mostUsedEquipment: null,
+    mostTrainedCategory: null,
+    longestWorkout: null
+  };
+  
+  // 가장 많이 사용한 기구
+  if (stats.equipmentStats.length > 0) {
+    const mostUsed = stats.equipmentStats[0];
+    insights.mostUsedEquipment = {
+      name: mostUsed.equipment.name,
+      count: mostUsed.count,
+      totalTime: mostUsed.totalTimeFormatted
+    };
+  }
+  
+  // 가장 많이 훈련한 카테고리
+  if (stats.categoryStats.length > 0) {
+    const mostTrained = stats.categoryStats[0];
+    insights.mostTrainedCategory = {
+      category: mostTrained.category,
+      percentage: mostTrained.percentage,
+      totalTime: mostTrained.totalTimeFormatted
+    };
+  }
+  
+  // 가장 긴 운동
+  if (stats.workoutDetails.length > 0) {
+    const longest = stats.workoutDetails.reduce((max, workout) => 
+      workout.durationSeconds > max.durationSeconds ? workout : max
+    , stats.workoutDetails[0]);
+    
+    insights.longestWorkout = {
+      equipmentName: longest.equipmentName,
+      duration: longest.durationFormatted,
+      sets: longest.sets
+    };
+  }
+  
+  res.json({
+    date: startOfToday.toISOString().split('T')[0],
+    summary: stats.summary,
+    workouts: stats.workoutDetails,
+    categoryBreakdown: stats.categoryStats,
+    insights: insights
   });
 }));
 
