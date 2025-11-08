@@ -19,7 +19,24 @@
 - **실시간 알림**: WebSocket을 통한 즉시 알림
 
 ## Backend API 문서
-### 추가API
+### 추가API 1108
+- **루틴 수정(부분 변경) 전용 엔드포인트**
+  - `PATCH /api/routines/:routineId/name` — 루틴 이름만 변경
+  - `POST  /api/routines/:routineId/exercises/add` — 루틴에 기구 추가
+  - `DELETE /api/routines/:routineId/exercises/:equipmentId` — 루틴에서 기구 제거
+  - `PATCH /api/routines/:routineId/exercises/:equipmentId/sets` — 세트 수만 변경
+  - `PATCH /api/routines/:routineId/exercises/:equipmentId/rest` — 휴식 시간만 변경
+  - `PATCH /api/routines/:routineId/exercises/:equipmentId/order` — 순서만 변경
+- **루틴 운동 시작**
+  - `POST /api/routines/:routineId/start-first` — 첫 운동 자동 시작
+  - `POST /api/routines/:routineId/start/:equipmentId` — 특정 기구부터 시작
+  - `POST /api/routines/:routineId/next` - 루틴 상 다음 운동 시작
+- **운동 진행 관리(사용자 기반, equipmentId 불필요)**
+  - `POST /api/waiting/complete-set` — 현재 사용 중인 기구의 세트 완료
+  - `POST /api/waiting/skip-rest` — 현재 사용 중인 기구의 휴식 스킵
+  - `POST /api/waiting/stop-exercise` — 현재 운동 중단
+ 
+### 추가API 1104
 - 🆕 `GET /api/equipment/today-total-time` - 오늘 하루 총 운동시간 및 상세 분석
 
 ### 알람API
@@ -81,6 +98,116 @@
 - `GET /api/routines/active-usage/status`- 현재 운동 상태 True/False
 
 # 📋 요청 바디, 응답 바디
+## 추가된 API 1108
+### 1. **루틴 수정(부분 변경) 전용 엔드포인트**
+  - `PATCH /api/routines/:routineId/name` — 루틴 이름만 변경
+- 요청 바디
+  ```json
+  { "name": "강화된 하체 루틴" }
+  ```
+- 응답(예시)
+  ```json
+  { "message": "루틴 이름이 변경되었습니다", "id": 7, "name": "강화된 하체 루틴" }
+  ```
+  - `POST  /api/routines/:routineId/exercises/add` — 루틴에 기구 추가
+  - 요청 바디
+  ```json
+  { "equipmentId": 10, "targetSets": 3, "restSeconds": 120, "notes": "폼 집중" }
+  ```
+- 응답(예시)
+  ```json
+  {
+    "message": "기구가 추가되었습니다",
+    "routineId": 7,
+    "exercise": { "equipmentId": 10, "targetSets": 3, "restSeconds": 120, "order": 4, "notes": "폼 집중" }
+  }
+  ```
+
+  - `DELETE /api/routines/:routineId/exercises/:equipmentId` — 루틴에서 기구 제거
+  - 응답(예시) `{ "message": "기구가 삭제되었습니다", "routineId": 7, "equipmentId": 5 }`
+
+  - `PATCH /api/routines/:routineId/exercises/:equipmentId/sets` — 세트 수만 변경
+  - 요청 바디
+  ```json
+  { "targetSets": 5 }
+  ```
+- 응답(예시)
+  ```json
+  { "message": "세트 수가 변경되었습니다", "routineId": 7, "equipmentId": 1, "targetSets": 5 }
+  ```
+
+  - `PATCH /api/routines/:routineId/exercises/:equipmentId/rest` — 휴식 시간만 변경
+  - 요청 바디
+  ```json
+  { "restSeconds": 90 }
+  ```
+- 응답(예시)
+  ```json
+  { "message": "휴식 시간이 변경되었습니다", "routineId": 7, "equipmentId": 1, "restSeconds": 90 }
+  ```
+
+  - `PATCH /api/routines/:routineId/exercises/:equipmentId/order` — 순서만 변경
+  - 요청 바디
+  ```json
+  { "newOrder": 1 }
+  ```
+- 응답(예시)
+  ```json
+  { "message": "순서가 변경되었습니다", "routineId": 7, "equipmentId": 5, "order": 1 }
+
+### 2. **루틴 운동 시작**
+  - `POST /api/routines/:routineId/start-first` — 첫 운동 자동 시작
+  - 요청 바디(예시)
+  ```json
+  { "totalSets": 3, "restSeconds": 180 }
+  ```
+- 성공 응답(예시)
+  ```json
+  {
+    "message": "하체 루틴 시작: 스쿼트",
+    "routineId": 7,
+    "routineName": "하체 루틴",
+    "equipmentId": 1,
+    "equipmentName": "스쿼트",
+    "totalSets": 3,
+    "restSeconds": 180,
+    "usageId": 42,
+    "nextExercises": [ { "equipmentId": 5, "equipmentName": "레그프레스", "order": 2 }, { "equipmentId": 6, "equipmentName": "레그컬", "order": 3 } ]
+  }
+  ```
+
+  - `POST /api/routines/:routineId/start/:equipmentId` — 특정 기구부터 시작
+  - 요청 바디(예시)
+  ```json
+  { "totalSets": 4, "restSeconds": 90 }
+  ```
+- 성공 응답(예시)
+  ```json
+  {
+    "message": "하체 루틴 시작: 레그프레스",
+    "routineId": 7,
+    "routineName": "하체 루틴",
+    "equipmentId": 5,
+    "equipmentName": "레그프레스",
+    "totalSets": 4,
+    "restSeconds": 90,
+    "usageId": 43,
+    "nextExercises": [ { "equipmentId": 6, "equipmentName": "레그컬", "order": 3 } ]
+  }
+  ```
+
+  - `POST /api/routines/:routineId/next` - 루틴 상 다음 운동 시작
+  - 성공 응답(예시)
+  ```json
+  {
+    "message": "루틴 시작: 랫풀다운",
+    "equipmentName": "랫풀다운",
+    "totalSets": 3,
+    "restSeconds": 120,
+    "usageId": 14
+  }
+  ```
+
 ## 0. 알림 리스트 API
 ### 0.1 알림목록조회
 ```
