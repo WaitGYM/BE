@@ -18,35 +18,30 @@ const RATE_LIMIT = { WINDOW_MS: 60_000, MAX_REQUESTS: 3, COOLDOWN_MS: 10_000 };
 function checkRateLimit(userId) {
   const now = Date.now();
   const rec = userUpdateLimiter.get(userId);
-  
-  if (!rec) { 
-    userUpdateLimiter.set(userId, { lastUpdate: now, requestCount: 1 }); 
-    return { allowed: true }; 
+  if (!rec) {
+    userUpdateLimiter.set(userId, { lastUpdate: now, requestCount: 1 });
+    return { allowed: true };
   }
-  
   if (now - rec.lastUpdate > RATE_LIMIT.WINDOW_MS) {
     userUpdateLimiter.set(userId, { lastUpdate: now, requestCount: 1 });
-    return { allowed: true }; 
+    return { allowed: true };
   }
-  
   if (now - rec.lastUpdate < RATE_LIMIT.COOLDOWN_MS) {
-    return { 
-      allowed: false, 
+    return {
+      allowed: false,
       remainingMs: RATE_LIMIT.COOLDOWN_MS - (now - rec.lastUpdate),
-      reason: 'cooldown' 
+      reason: 'cooldown'
     };
   }
-  
   if (rec.requestCount >= RATE_LIMIT.MAX_REQUESTS) {
-    return { 
-      allowed: false, 
+    return {
+      allowed: false,
       remainingMs: RATE_LIMIT.WINDOW_MS - (now - rec.lastUpdate),
-      reason: 'rate_limit' 
+      reason: 'rate_limit'
     };
   }
-  
-  rec.requestCount++; 
-  rec.lastUpdate = now; 
+  rec.requestCount++;
+  rec.lastUpdate = now;
   return { allowed: true };
 }
 
@@ -136,8 +131,8 @@ async function startAutoUpdate(equipmentId) {
           progress: Math.round((currentUsage.currentSet / currentUsage.totalSets) * 100),
         },
         waitingQueue: queue.map((q, i) => ({
-          id: q.id, 
-          position: q.queuePosition, 
+          id: q.id,
+          position: q.queuePosition,
           userName: q.user.name,
           estimatedWaitMinutes: queueETAs[i],
         })),
@@ -168,8 +163,8 @@ async function startAutoUpdate(equipmentId) {
 
 function stopAutoUpdate(equipmentId) {
   const id = autoUpdateIntervals.get(equipmentId);
-  if (id) { 
-    clearInterval(id); 
+  if (id) {
+    clearInterval(id);
     autoUpdateIntervals.delete(equipmentId);
   }
 }
@@ -183,9 +178,9 @@ async function reorderQueue(equipmentId) {
   
   for (let i = 0; i < rows.length; i++) {
     if (rows[i].queuePosition !== i + 1) {
-      await prisma.waitingQueue.update({ 
+      await prisma.waitingQueue.update({
         where: { id: rows[i].id },
-        data: { queuePosition: i + 1 } 
+        data: { queuePosition: i + 1 }
       });
     }
   }
@@ -257,9 +252,9 @@ async function notifyNextUser(equipmentId) {
   setTimeout(async () => {
     const fresh = await prisma.waitingQueue.findUnique({ where: { id: next.id } });
     if (fresh && fresh.status === 'NOTIFIED') {
-      await prisma.waitingQueue.update({ 
-        where: { id: next.id }, 
-        data: { status: 'EXPIRED' } 
+      await prisma.waitingQueue.update({
+        where: { id: next.id },
+        data: { status: 'EXPIRED' }
       });
       
       await sendAndSaveNotification(next.userId, {
@@ -303,7 +298,6 @@ async function notifyCurrentUserWaitingCount(equipmentId, opts = {}) {
   
   const now = Date.now();
   const prev = lastWaitNotice.get(equipmentId);
-  
   if (prev && prev.count === waitingCount && (now - prev.ts) < cooldownMs) {
     return false;
   }
@@ -330,6 +324,59 @@ async function sendAndSaveNotification(userId, payload) {
   return true;
 }
 
+// ===== 🆕 사용자 운동 조회 헬퍼 =====
+
+/**
+ * 사용자의 현재 활성 운동 조회
+ * @param {number} userId - 사용자 ID
+ * @returns {Promise<Object|null>} 현재 사용중인 EquipmentUsage 또는 null
+ */
+async function getCurrentUsage(userId) {
+  return await prisma.equipmentUsage.findFirst({
+    where: { userId, status: 'IN_USE' },
+    include: { 
+      equipment: {
+        select: {
+          id: true,
+          name: true,
+          category: true,
+          imageUrl: true,
+          muscleGroup: true
+        }
+      }, 
+      user: { select: { id: true, name: true } } 
+    }
+  });
+}
+
+/**
+ * equipmentId로 특정 기구 사용 조회
+ * @param {number} userId - 사용자 ID
+ * @param {number} equipmentId - 기구 ID
+ * @returns {Promise<Object|null>} 해당 기구의 EquipmentUsage 또는 null
+ */
+async function getUsageByEquipment(userId, equipmentId) {
+  return await prisma.equipmentUsage.findFirst({
+    where: { 
+      equipmentId, 
+      userId, 
+      status: 'IN_USE' 
+    },
+    include: { 
+      equipment: {
+        select: {
+          id: true,
+          name: true,
+          category: true,
+          imageUrl: true,
+          muscleGroup: true
+        }
+      }, 
+      user: { select: { id: true, name: true } } 
+    }
+  });
+}
+
 module.exports = {
   RATE_LIMIT,
   checkRateLimit,
@@ -347,4 +394,7 @@ module.exports = {
   computeStopSummary,
   notifyCurrentUserWaitingCount,
   sendAndSaveNotification,
+  // 🆕 추가
+  getCurrentUsage,
+  getUsageByEquipment,
 };

@@ -11,6 +11,9 @@ const {
   initWorkAcc, clearWorkAcc, computeSummaryOnComplete,
   notifyCurrentUserWaitingCount, computeStopSummary,
   sendAndSaveNotification, // 이벤트 버스 사용하는 헬퍼
+  // 🆕 이 2개만 추가
+  getCurrentUsage,
+  getUsageByEquipment,
 } = require('../services/waiting.service');
 const { authOptional } = require('../utils/authOptional');
 const { getEquipmentStatusInfo } = require('../services/equipment.service');
@@ -837,5 +840,334 @@ router.get('/admin/stats', auth(), asyncRoute(async (_req, res) => {
     rateLimitPolicy: RATE_LIMIT,
   });
 }));
+
+// ==========================================
+// 📍 2단계: 파일 맨 아래에 신규 API 4개 추가
+// (module.exports 위에 추가)
+// ==========================================
+
+// 🆕 POST /api/waiting/complete-set
+// 현재 사용중인 기구의 세트 완료 (equipmentId 불필요)
+router.post('/complete-set', auth(), asyncRoute(async (req, res) => {
+  const usage = await getCurrentUsage(req.user.id);
+  
+  if (!usage) {
+    return res.status(404).json({ 
+      error: '현재 사용 중인 기구가 없습니다',
+      suggestion: '운동을 시작한 후 다시 시도해주세요'
+    });
+  }
+  
+  if (usage.setStatus !== 'EXERCISING') {
+    return res.status(400).json({
+      error: 'EXERCISING 상태가 아닙니다',
+      currentStatus: usage.setStatus,
+      equipmentName: usage.equipment.name
+    });
+  }
+
+  const equipmentId = usage.equipmentId;
+  const { summary } = computeSummaryOnComplete(usage, new Date());
+  const isLastSet = usage.currentSet >= usage.totalSets;
+
+  if (isLastSet) {
+    const completedUsage = await prisma.equipmentUsage.update({
+      where: { id: usage.id },
+      data: { status: 'COMPLETED', setStatus: 'COMPLETED', endedAt: new Date() },
+      include: { equipment: true, user: { select: { name: true } } }
+    });
+
+    eventBus.emitWorkoutCompletion(equipmentId, {
+      type: 'workout_completed',
+      equipmentName: usage.equipment.name,
+      userName: usage.user.name,
+      userId: req.user.id,
+      totalSets: usage.totalSets,
+      completedSets: usage.currentSet,
+      completedAt: completedUsage.endedAt,
+      durationSeconds: Math.round((completedUsage.endedAt - usage.startedAt) / 1000),
+      wasFullyCompleted: true,
+      completionMessage: `🎉 ${usage.user.name}님이 ${usage.equipment.name} 운동을 완료했습니다!`
+    });
+
+    clearWorkAcc(usage.id);
+    stopAutoUpdate(equipmentId);
+    setTimeout(() => notifyNextUser(equipmentId), 1000);
+
+    return res.json({
+      message: `전체 ${usage.totalSets}세트 완료!`,
+      completed: true,
+      equipmentName: usage.equipment.name,
+      summary
+    });
+  }
+
+  await prisma.equipmentUsage.update({
+    where: { id: usage.id },
+    data: { setStatus: 'RESTING', restStartedAt: new Date() }
+  });
+
+  eventBus.emitEquipmentStatusChange(equipmentId, {
+    type: 'rest_started',
+    equipmentName: usage.equipment.name,
+    userName: usage.user.name,
+    currentSet: usage.currentSet,
+    totalSets: usage.totalSets,
+    restSeconds: usage.restSeconds,
+  });
+
+  await sendAndSaveNotification(req.user.id, {
+    type: 'REST_STARTED',
+    title: '휴식 시작',
+    message: `${usage.currentSet}/${usage.totalSets} 세트 완료`,
+    equipmentId,
+    restSeconds: usage.restSeconds
+  });
+
+  if (usage.restSeconds > 0) {
+    setTimeout(async () => {
+      const current = await prisma.equipmentUsage.findUnique({
+        where: { id: usage.id },
+        include: { equipment: true, user: { select: { name: true } } }
+      });
+      
+      if (current && current.setStatus === 'RESTING' && current.status === 'IN_USE') {
+        await prisma.equipmentUsage.update({
+          where: { id: usage.id },
+          data: {
+            currentSet: current.currentSet + 1,
+            setStatus: 'EXERCISING',
+            currentSetStartedAt: new Date(),
+            restStartedAt: null
+          }
+        });
+
+        eventBus.emitEquipmentStatusChange(equipmentId, {
+          type: 'next_set_started',
+          equipmentName: current.equipment.name,
+          userName: current.user.name,
+          currentSet: current.currentSet + 1,
+          totalSets: current.totalSets
+        });
+
+        await sendAndSaveNotification(req.user.id, {
+          type: 'NEXT_SET_STARTED',
+          title: '다음 세트',
+          message: `${current.currentSet + 1}/${current.totalSets} 세트 시작`,
+          equipmentId
+        });
+      }
+    }, usage.restSeconds * 1000);
+  }
+
+  res.json({
+    message: `${usage.currentSet}/${usage.totalSets} 세트 완료`,
+    setStatus: 'RESTING',
+    restSeconds: usage.restSeconds,
+    equipmentName: usage.equipment.name,
+    summary
+  });
+}));
+
+// 🆕 POST /api/waiting/skip-rest
+// 현재 사용중인 기구의 휴식 건너뛰기 (equipmentId 불필요)
+router.post('/skip-rest', auth(), asyncRoute(async (req, res) => {
+  const usage = await getCurrentUsage(req.user.id);
+  
+  if (!usage) {
+    return res.status(404).json({ 
+      error: '현재 사용 중인 기구가 없습니다',
+      suggestion: '운동을 시작한 후 다시 시도해주세요'
+    });
+  }
+
+  if (usage.setStatus !== 'RESTING') {
+    return res.status(400).json({
+      error: '휴식 중이 아닙니다',
+      currentStatus: usage.setStatus,
+      equipmentName: usage.equipment.name,
+      message: '휴식 중일 때만 건너뛸 수 있습니다'
+    });
+  }
+
+  const equipmentId = usage.equipmentId;
+  const nextSet = usage.currentSet + 1;
+  const isLastSet = nextSet > usage.totalSets;
+
+  if (isLastSet) {
+    const completedUsage = await prisma.equipmentUsage.update({
+      where: { id: usage.id },
+      data: { status: 'COMPLETED', setStatus: 'COMPLETED', endedAt: new Date() },
+      include: { equipment: true, user: { select: { name: true } } }
+    });
+
+    eventBus.emitWorkoutCompletion(equipmentId, {
+      type: 'workout_completed',
+      equipmentName: usage.equipment.name,
+      userName: usage.user.name,
+      userId: req.user.id,
+      totalSets: usage.totalSets,
+      completedSets: usage.currentSet,
+      completedAt: completedUsage.endedAt,
+      durationSeconds: Math.round((completedUsage.endedAt - usage.startedAt) / 1000),
+      wasFullyCompleted: true,
+      wasSkipped: true,
+      completionMessage: `🎉 ${usage.user.name}님이 ${usage.equipment.name} 운동을 완료했습니다!`
+    });
+
+    stopAutoUpdate(equipmentId);
+    setTimeout(() => notifyNextUser(equipmentId), 1000);
+
+    return res.json({
+      message: `전체 ${usage.totalSets}세트 완료!`,
+      completed: true,
+      equipmentName: usage.equipment.name,
+      skippedRest: true
+    });
+  }
+
+  await prisma.equipmentUsage.update({
+    where: { id: usage.id },
+    data: {
+      currentSet: nextSet,
+      setStatus: 'EXERCISING',
+      currentSetStartedAt: new Date(),
+      restStartedAt: null
+    }
+  });
+
+  eventBus.emitEquipmentStatusChange(equipmentId, {
+    type: 'rest_skipped',
+    equipmentName: usage.equipment.name,
+    userName: usage.user.name,
+    currentSet: nextSet,
+    totalSets: usage.totalSets,
+    skippedAt: new Date()
+  });
+
+  await sendAndSaveNotification(req.user.id, {
+    type: 'REST_SKIPPED',
+    title: '휴식 건너뛰기',
+    message: `${nextSet}/${usage.totalSets} 세트 시작`,
+    equipmentId,
+    currentSet: nextSet,
+    totalSets: usage.totalSets
+  });
+
+  res.json({
+    message: `휴식을 건너뛰고 ${nextSet}/${usage.totalSets}세트를 시작합니다`,
+    currentSet: nextSet,
+    totalSets: usage.totalSets,
+    setStatus: 'EXERCISING',
+    equipmentName: usage.equipment.name,
+    skippedRest: true,
+    progress: Math.round((nextSet / usage.totalSets) * 100)
+  });
+}));
+
+// 🆕 POST /api/waiting/stop-exercise
+// 현재 사용중인 기구의 운동 중단 (equipmentId 불필요)
+router.post('/stop-exercise', auth(), asyncRoute(async (req, res) => {
+  const usage = await getCurrentUsage(req.user.id);
+  
+  if (!usage) {
+    return res.status(404).json({ 
+      error: '현재 사용 중인 기구가 없습니다',
+      suggestion: '운동을 시작한 후 다시 시도해주세요'
+    });
+  }
+
+  const equipmentId = usage.equipmentId;
+  const now = new Date();
+  const stopSummary = computeStopSummary(usage, now);
+
+  const stoppedUsage = await prisma.equipmentUsage.update({
+    where: { id: usage.id },
+    data: { status: 'COMPLETED', setStatus: 'STOPPED', endedAt: now },
+    include: { equipment: true, user: { select: { name: true } } }
+  });
+
+  eventBus.emitWorkoutCompletion(equipmentId, {
+    type: 'workout_stopped',
+    equipmentName: usage.equipment.name,
+    userName: usage.user.name,
+    userId: req.user.id,
+    totalSets: usage.totalSets,
+    completedSets: usage.currentSet,
+    stoppedAt: stoppedUsage.endedAt,
+    durationSeconds: stopSummary.totalDurationSec,
+    workTimeSec: stopSummary.workTimeSec,
+    restTimeSec: stopSummary.restTimeSec,
+    workTime: stopSummary.workTime,
+    restTime: stopSummary.restTime,
+    totalDuration: stopSummary.totalDuration,
+    wasFullyCompleted: false,
+    wasInterrupted: true,
+    completionMessage: `${usage.user.name}님이 ${usage.equipment.name} 운동을 중단했습니다`
+  });
+
+  await sendAndSaveNotification(req.user.id, {
+    type: 'EXERCISE_STOPPED',
+    title: '운동 중단',
+    message: `${usage.equipment.name} 운동 중단`,
+    equipmentId,
+    summary: stopSummary
+  });
+
+  stopAutoUpdate(equipmentId);
+  clearWorkAcc(usage.id);
+  setTimeout(() => notifyNextUser(equipmentId), 1000);
+
+  res.json({
+    message: '운동 중단 완료',
+    equipmentName: usage.equipment.name,
+    summary: stopSummary
+  });
+}));
+
+// 🆕 GET /api/waiting/current-usage
+// 현재 사용중인 기구 정보 조회 (상태 확인용)
+router.get('/current-usage', auth(), asyncRoute(async (req, res) => {
+  const usage = await getCurrentUsage(req.user.id);
+  
+  if (!usage) {
+    return res.json({ 
+      active: false,
+      message: '현재 사용 중인 기구가 없습니다'
+    });
+  }
+
+  // 휴식 남은 시간 계산
+  let restTimeLeft = 0;
+  if (usage.setStatus === 'RESTING' && usage.restStartedAt) {
+    const restElapsed = Date.now() - usage.restStartedAt.getTime();
+    restTimeLeft = Math.max(0, Math.ceil((usage.restSeconds * 1000 - restElapsed) / 1000));
+  }
+
+  // 세트 진행률 계산
+  const setProgress = usage.setStatus === 'EXERCISING' && usage.currentSetStartedAt
+    ? Math.min(100, Math.round((Date.now() - usage.currentSetStartedAt.getTime()) / (3 * 60 * 1000) * 100))
+    : 0;
+
+  res.json({
+    active: true,
+    usageId: usage.id,
+    equipmentId: usage.equipmentId,
+    equipmentName: usage.equipment.name,
+    equipmentCategory: usage.equipment.category,
+    equipmentImageUrl: usage.equipment.imageUrl,
+    totalSets: usage.totalSets,
+    currentSet: usage.currentSet,
+    setStatus: usage.setStatus,
+    restSeconds: usage.restSeconds,
+    restTimeLeft: restTimeLeft,
+    progress: Math.round((usage.currentSet / usage.totalSets) * 100),
+    setProgress: setProgress,
+    startedAt: usage.startedAt,
+    estimatedEndAt: usage.estimatedEndAt
+  });
+}));
+
+
 
 module.exports = { router };

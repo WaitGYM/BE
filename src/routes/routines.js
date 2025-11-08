@@ -462,4 +462,756 @@ router.get('/active-usage/status', auth(), asyncRoute(async (req, res) => {
   });
 }));
 
+// ==========================================
+// 🆕 간단한 루틴 시작 API
+// ==========================================
+
+// ==========================================
+// 🆕 POST /api/routines/:routineId/start/:equipmentId
+// URL에 equipmentId 포함 - 가장 명확하고 RESTful한 방식!
+// ==========================================
+router.post('/:routineId/start/:equipmentId', auth(), asyncRoute(async (req, res) => {
+  const routineId = parseInt(req.params.routineId, 10);
+  const equipmentId = parseInt(req.params.equipmentId, 10);
+  const { totalSets, restSeconds } = req.body;
+
+  // 1. 루틴 존재 및 소유권 확인
+  const routine = await prisma.workoutRoutine.findFirst({
+    where: { id: routineId, userId: req.user.id },
+    include: {
+      exercises: {
+        include: { equipment: true },
+        orderBy: { order: 'asc' }
+      }
+    }
+  });
+
+  if (!routine) {
+    return res.status(404).json({ error: '루틴을 찾을 수 없습니다' });
+  }
+
+  // 2. 해당 기구가 루틴에 포함되어 있는지 확인
+  const exercise = routine.exercises.find(ex => ex.equipmentId === equipmentId);
+  
+  if (!exercise) {
+    return res.status(404).json({ 
+      error: '해당 기구가 이 루틴에 없습니다',
+      equipmentId: equipmentId,
+      routineName: routine.name,
+      availableEquipments: routine.exercises.map(ex => ({
+        equipmentId: ex.equipmentId,
+        equipmentName: ex.equipment.name,
+        order: ex.order
+      })),
+      suggestion: '위 기구 중 하나를 선택해주세요'
+    });
+  }
+
+  // 3. 기구 사용 가능 여부 확인
+  const currentUsage = await prisma.equipmentUsage.findFirst({
+    where: { equipmentId, status: 'IN_USE' },
+    include: { user: { select: { name: true } } }
+  });
+
+  if (currentUsage && currentUsage.userId !== req.user.id) {
+    return res.status(409).json({
+      error: '기구가 사용 중입니다',
+      equipmentName: exercise.equipment.name,
+      currentUser: currentUsage.user.name,
+      startedAt: currentUsage.startedAt,
+      suggestion: '대기열에 등록하거나 루틴의 다른 운동을 먼저 하세요'
+    });
+  }
+
+  // 4. 이미 다른 기구 사용 중인지 확인
+  const myUsage = await prisma.equipmentUsage.findFirst({
+    where: { userId: req.user.id, status: 'IN_USE' },
+    include: { equipment: true }
+  });
+
+  if (myUsage && myUsage.equipmentId !== equipmentId) {
+    return res.status(409).json({
+      error: '이미 다른 기구를 사용 중입니다',
+      currentEquipment: myUsage.equipment.name,
+      currentEquipmentId: myUsage.equipmentId,
+      requestedEquipment: exercise.equipment.name,
+      suggestion: '현재 운동을 완료한 후 다시 시도하세요'
+    });
+  }
+
+  // 5. 운동 설정 (body 또는 루틴 기본값 사용)
+  const sets = totalSets || exercise.targetSets || 3;
+  const restSec = restSeconds !== undefined ? restSeconds : (exercise.restSeconds || 180);
+
+  // 6. 예상 종료 시간 계산
+  const workTimeSeconds = sets * 5 * 60; // 5분/세트
+  const restTimeSeconds = (sets - 1) * restSec;
+  const totalDurationSeconds = workTimeSeconds + restTimeSeconds;
+
+  // 7. 트랜잭션으로 루틴 활성화 + 운동 시작
+  const usage = await prisma.$transaction(async (tx) => {
+    // 내 모든 루틴 비활성화
+    await tx.workoutRoutine.updateMany({
+      where: { userId: req.user.id, isActive: true },
+      data: { isActive: false },
+    });
+
+    // 이 루틴 활성화
+    await tx.workoutRoutine.update({
+      where: { id: routineId },
+      data: { isActive: true, updatedAt: new Date() },
+    });
+
+    // 기구 사용 시작
+    return tx.equipmentUsage.create({
+      data: {
+        equipmentId,
+        userId: req.user.id,
+        totalSets: sets,
+        restSeconds: restSec,
+        status: 'IN_USE',
+        setStatus: 'EXERCISING',
+        currentSet: 1,
+        currentSetStartedAt: new Date(),
+        estimatedEndAt: new Date(Date.now() + totalDurationSeconds * 1000),
+      },
+      include: { equipment: true }
+    });
+  });
+
+  // 8. 성공 응답
+  res.json({
+    message: `${routine.name}: ${exercise.equipment.name} 시작`,
+    routine: {
+      id: routine.id,
+      name: routine.name,
+      isActive: true
+    },
+    equipment: {
+      id: exercise.equipmentId,
+      name: exercise.equipment.name,
+      category: exercise.equipment.category,
+      imageUrl: exercise.equipment.imageUrl
+    },
+    workout: {
+      usageId: usage.id,
+      totalSets: sets,
+      restSeconds: restSec,
+      currentSet: 1,
+      setStatus: 'EXERCISING',
+      startedAt: usage.startedAt,
+      estimatedEndAt: usage.estimatedEndAt
+    },
+    exerciseInfo: {
+      order: exercise.order,
+      targetReps: exercise.targetReps,
+      notes: exercise.notes
+    },
+    nextExercises: routine.exercises
+      .filter(ex => ex.order > exercise.order)
+      .map(ex => ({
+        equipmentId: ex.equipmentId,
+        equipmentName: ex.equipment.name,
+        order: ex.order
+      }))
+  });
+}));
+
+
+/**
+ * POST /api/routines/:routineId/start-first
+ * 루틴의 첫 번째 운동을 자동으로 시작 (가장 간단)
+ */
+router.post('/:routineId/start-first', auth(), asyncRoute(async (req, res) => {
+  const routineId = parseInt(req.params.routineId, 10);
+  const { totalSets, restSeconds } = req.body;
+
+  // 루틴 조회
+  const routine = await prisma.workoutRoutine.findFirst({
+    where: { id: routineId, userId: req.user.id },
+    include: {
+      exercises: {
+        include: { equipment: true },
+        orderBy: { order: 'asc' }
+      }
+    }
+  });
+
+  if (!routine) {
+    return res.status(404).json({ error: '루틴을 찾을 수 없습니다' });
+  }
+
+  if (routine.exercises.length === 0) {
+    return res.status(400).json({ error: '루틴에 운동이 없습니다' });
+  }
+
+  // 첫 번째 운동
+  const firstExercise = routine.exercises[0];
+
+  // 기구 사용 가능 여부 확인
+  const currentUsage = await prisma.equipmentUsage.findFirst({
+    where: { equipmentId: firstExercise.equipmentId, status: 'IN_USE' }
+  });
+
+  if (currentUsage && currentUsage.userId !== req.user.id) {
+    return res.status(409).json({
+      error: '기구가 사용 중입니다',
+      equipmentName: firstExercise.equipment.name,
+      suggestion: '루틴의 다른 운동부터 시작하거나 대기열에 등록하세요'
+    });
+  }
+
+  // 내가 이미 다른 기구 사용 중인지 확인
+  const myUsage = await prisma.equipmentUsage.findFirst({
+    where: { userId: req.user.id, status: 'IN_USE' },
+    include: { equipment: true }
+  });
+
+  if (myUsage) {
+    return res.status(409).json({
+      error: '이미 다른 기구를 사용 중입니다',
+      currentEquipment: myUsage.equipment.name,
+      currentEquipmentId: myUsage.equipmentId,
+      suggestion: '현재 운동을 완료한 후 다시 시도하세요'
+    });
+  }
+
+  // 운동 설정
+  const sets = totalSets || firstExercise.targetSets || 3;
+  const restSec = restSeconds !== undefined ? restSeconds : (firstExercise.restSeconds || 180);
+
+  // 예상 종료 시간 계산
+  const workTimeSeconds = sets * 5 * 60;
+  const restTimeSeconds = (sets - 1) * restSec;
+  const totalDurationSeconds = workTimeSeconds + restTimeSeconds;
+
+  const usage = await prisma.$transaction(async (tx) => {
+    // 1) 내 모든 루틴 비활성화
+    await tx.workoutRoutine.updateMany({
+      where: { userId: req.user.id, isActive: true },
+      data: { isActive: false },
+    });
+
+    // 2) 이번에 시작한 루틴 활성화
+    await tx.workoutRoutine.update({
+      where: { id: routineId },
+      data: { isActive: true, updatedAt: new Date() },
+    });
+
+    // 3) 기구 사용 시작
+    return tx.equipmentUsage.create({
+      data: {
+        equipmentId: firstExercise.equipmentId,
+        userId: req.user.id,
+        totalSets: sets,
+        restSeconds: restSec,
+        status: 'IN_USE',
+        setStatus: 'EXERCISING',
+        currentSet: 1,
+        currentSetStartedAt: new Date(),
+        estimatedEndAt: new Date(Date.now() + totalDurationSeconds * 1000),
+      },
+      include: { equipment: true }
+    });
+  });
+
+  res.json({
+    message: `${routine.name} 시작: ${firstExercise.equipment.name}`,
+    routineId: routine.id,
+    routineName: routine.name,
+    equipmentId: firstExercise.equipmentId,
+    equipmentName: firstExercise.equipment.name,
+    totalSets: sets,
+    restSeconds: restSec,
+    usageId: usage.id,
+    nextExercises: routine.exercises.slice(1).map(ex => ({
+      equipmentId: ex.equipmentId,
+      equipmentName: ex.equipment.name,
+      order: ex.order
+    }))
+  });
+}));
+
+/**
+ * POST /api/routines/:routineId/next
+ * 현재 루틴의 다음 운동으로 넘어가기
+ */
+router.post('/:routineId/next', auth(), asyncRoute(async (req, res) => {
+  const routineId = parseInt(req.params.routineId, 10);
+  const { totalSets, restSeconds } = req.body;
+
+  // 루틴 조회
+  const routine = await prisma.workoutRoutine.findFirst({
+    where: { id: routineId, userId: req.user.id, isActive: true },
+    include: {
+      exercises: {
+        include: { equipment: true },
+        orderBy: { order: 'asc' }
+      }
+    }
+  });
+
+  if (!routine) {
+    return res.status(404).json({ 
+      error: '활성 루틴을 찾을 수 없습니다',
+      suggestion: '루틴을 먼저 시작해주세요'
+    });
+  }
+
+  // 현재 사용중인 기구 확인
+  const currentUsage = await prisma.equipmentUsage.findFirst({
+    where: { userId: req.user.id, status: 'IN_USE' },
+    include: { equipment: true }
+  });
+
+  if (!currentUsage) {
+    // 사용중인 기구가 없으면 첫 번째 운동 시작
+    const firstExercise = routine.exercises[0];
+    
+    if (!firstExercise) {
+      return res.status(400).json({ error: '루틴에 운동이 없습니다' });
+    }
+
+    // 첫 번째 운동 시작 로직 (동일)
+    const sets = totalSets || firstExercise.targetSets || 3;
+    const restSec = restSeconds !== undefined ? restSeconds : (firstExercise.restSeconds || 180);
+    const workTimeSeconds = sets * 5 * 60;
+    const restTimeSeconds = (sets - 1) * restSec;
+    const totalDurationSeconds = workTimeSeconds + restTimeSeconds;
+
+    const usage = await prisma.equipmentUsage.create({
+      data: {
+        equipmentId: firstExercise.equipmentId,
+        userId: req.user.id,
+        totalSets: sets,
+        restSeconds: restSec,
+        status: 'IN_USE',
+        setStatus: 'EXERCISING',
+        currentSet: 1,
+        currentSetStartedAt: new Date(),
+        estimatedEndAt: new Date(Date.now() + totalDurationSeconds * 1000),
+      },
+      include: { equipment: true }
+    });
+
+    return res.json({
+      message: `루틴 시작: ${firstExercise.equipment.name}`,
+      equipmentName: firstExercise.equipment.name,
+      totalSets: sets,
+      restSeconds: restSec,
+      usageId: usage.id
+    });
+  }
+
+  // 현재 운동의 다음 순서 찾기
+  const currentExercise = routine.exercises.find(ex => ex.equipmentId === currentUsage.equipmentId);
+  
+  if (!currentExercise) {
+    return res.status(400).json({ 
+      error: '현재 운동이 이 루틴에 속하지 않습니다',
+      currentEquipment: currentUsage.equipment.name
+    });
+  }
+
+  // 다음 운동 찾기
+  const nextExercise = routine.exercises.find(ex => ex.order > currentExercise.order);
+
+  if (!nextExercise) {
+    return res.status(400).json({ 
+      error: '루틴의 모든 운동을 완료했습니다',
+      message: '축하합니다! 루틴을 완료했습니다 🎉'
+    });
+  }
+
+  // 다음 기구 사용 가능 여부 확인
+  const nextUsage = await prisma.equipmentUsage.findFirst({
+    where: { equipmentId: nextExercise.equipmentId, status: 'IN_USE' }
+  });
+
+  if (nextUsage && nextUsage.userId !== req.user.id) {
+    return res.status(409).json({
+      error: '다음 기구가 사용 중입니다',
+      nextEquipment: nextExercise.equipment.name,
+      suggestion: '대기열에 등록하거나 다른 운동을 먼저 하세요'
+    });
+  }
+
+  // 현재 운동 강제 종료하고 다음 운동 시작
+  const sets = totalSets || nextExercise.targetSets || 3;
+  const restSec = restSeconds !== undefined ? restSeconds : (nextExercise.restSeconds || 180);
+  const workTimeSeconds = sets * 5 * 60;
+  const restTimeSeconds = (sets - 1) * restSec;
+  const totalDurationSeconds = workTimeSeconds + restTimeSeconds;
+
+  await prisma.$transaction(async (tx) => {
+    // 현재 운동 강제 완료
+    await tx.equipmentUsage.update({
+      where: { id: currentUsage.id },
+      data: { status: 'COMPLETED', setStatus: 'FORCE_COMPLETED', endedAt: new Date() }
+    });
+
+    // 다음 운동 시작
+    return tx.equipmentUsage.create({
+      data: {
+        equipmentId: nextExercise.equipmentId,
+        userId: req.user.id,
+        totalSets: sets,
+        restSeconds: restSec,
+        status: 'IN_USE',
+        setStatus: 'EXERCISING',
+        currentSet: 1,
+        currentSetStartedAt: new Date(),
+        estimatedEndAt: new Date(Date.now() + totalDurationSeconds * 1000),
+      }
+    });
+  });
+
+  res.json({
+    message: `다음 운동: ${nextExercise.equipment.name}`,
+    previousEquipment: currentUsage.equipment.name,
+    currentEquipment: nextExercise.equipment.name,
+    totalSets: sets,
+    restSeconds: restSec,
+    remainingExercises: routine.exercises.filter(ex => ex.order > nextExercise.order).length
+  });
+}));
+
+// ==========================================
+// 🆕 간단한 루틴 수정 API들
+// ==========================================
+
+/**
+ * PATCH /api/routines/:routineId/name
+ * 루틴 이름만 변경
+ */
+router.patch('/:routineId/name', auth(), asyncRoute(async (req, res) => {
+  const routineId = parseInt(req.params.routineId, 10);
+  const { name } = req.body;
+
+  if (!name || name.trim().length === 0) {
+    return res.status(400).json({ error: '루틴 이름을 입력하세요' });
+  }
+
+  const routine = await prisma.workoutRoutine.findFirst({
+    where: { id: routineId, userId: req.user.id }
+  });
+
+  if (!routine) {
+    return res.status(404).json({ error: '루틴을 찾을 수 없습니다' });
+  }
+
+  const updated = await prisma.workoutRoutine.update({
+    where: { id: routineId },
+    data: { name: name.trim(), updatedAt: new Date() }
+  });
+
+  res.json({
+    message: '루틴 이름이 변경되었습니다',
+    id: updated.id,
+    name: updated.name
+  });
+}));
+
+/**
+ * POST /api/routines/:routineId/exercises/add
+ * 루틴에 기구 하나 추가
+ */
+router.post('/:routineId/exercises/add', auth(), asyncRoute(async (req, res) => {
+  const routineId = parseInt(req.params.routineId, 10);
+  const { equipmentId, targetSets, restSeconds, notes } = req.body;
+
+  if (!equipmentId) {
+    return res.status(400).json({ error: 'equipmentId가 필요합니다' });
+  }
+
+  // 루틴 소유권 확인
+  const routine = await prisma.workoutRoutine.findFirst({
+    where: { id: routineId, userId: req.user.id }
+  });
+
+  if (!routine) {
+    return res.status(404).json({ error: '루틴을 찾을 수 없습니다' });
+  }
+
+  // 기구 존재 확인
+  const equipment = await prisma.equipment.findUnique({ 
+    where: { id: equipmentId } 
+  });
+
+  if (!equipment) {
+    return res.status(404).json({ error: '기구를 찾을 수 없습니다' });
+  }
+
+  // 이미 루틴에 있는지 확인
+  const existing = await prisma.routineExercise.findUnique({
+    where: { routineId_equipmentId: { routineId, equipmentId } }
+  });
+
+  if (existing) {
+    return res.status(409).json({ 
+      error: '이미 루틴에 있는 기구입니다',
+      equipmentName: equipment.name
+    });
+  }
+
+  // 마지막 순서 찾기
+  const maxOrder = await prisma.routineExercise.findFirst({
+    where: { routineId },
+    orderBy: { order: 'desc' },
+    select: { order: true }
+  });
+
+  // 기구 추가
+  const exercise = await prisma.routineExercise.create({
+    data: {
+      routineId,
+      equipmentId,
+      order: (maxOrder?.order || 0) + 1,
+      targetSets: targetSets || 3,
+      restSeconds: restSeconds || 180,
+      notes: notes || null
+    },
+    include: { equipment: true }
+  });
+
+  res.status(201).json({
+    message: `${equipment.name}이(가) 루틴에 추가되었습니다`,
+    exercise: {
+      id: exercise.id,
+      equipmentId: exercise.equipmentId,
+      equipmentName: exercise.equipment.name,
+      order: exercise.order,
+      targetSets: exercise.targetSets,
+      restSeconds: exercise.restSeconds,
+      notes: exercise.notes
+    }
+  });
+}));
+
+/**
+ * DELETE /api/routines/:routineId/exercises/:equipmentId
+ * 루틴에서 특정 기구 삭제
+ */
+router.delete('/:routineId/exercises/:equipmentId', auth(), asyncRoute(async (req, res) => {
+  const routineId = parseInt(req.params.routineId, 10);
+  const equipmentId = parseInt(req.params.equipmentId, 10);
+
+  // 루틴 소유권 확인
+  const routine = await prisma.workoutRoutine.findFirst({
+    where: { id: routineId, userId: req.user.id }
+  });
+
+  if (!routine) {
+    return res.status(404).json({ error: '루틴을 찾을 수 없습니다' });
+  }
+
+  // 운동 찾기
+  const exercise = await prisma.routineExercise.findUnique({
+    where: { routineId_equipmentId: { routineId, equipmentId } },
+    include: { equipment: true }
+  });
+
+  if (!exercise) {
+    return res.status(404).json({ error: '루틴에 해당 기구가 없습니다' });
+  }
+
+  // 삭제 및 순서 재정렬
+  await prisma.$transaction(async (tx) => {
+    // 기구 삭제
+    await tx.routineExercise.delete({
+      where: { id: exercise.id }
+    });
+
+    // 남은 운동들의 순서 재정렬
+    const remaining = await tx.routineExercise.findMany({
+      where: { routineId },
+      orderBy: { order: 'asc' }
+    });
+
+    for (let i = 0; i < remaining.length; i++) {
+      if (remaining[i].order !== i + 1) {
+        await tx.routineExercise.update({
+          where: { id: remaining[i].id },
+          data: { order: i + 1 }
+        });
+      }
+    }
+  });
+
+  res.json({
+    message: `${exercise.equipment.name}이(가) 루틴에서 삭제되었습니다`,
+    deletedEquipment: {
+      equipmentId: exercise.equipmentId,
+      equipmentName: exercise.equipment.name
+    }
+  });
+}));
+
+/**
+ * PATCH /api/routines/:routineId/exercises/:equipmentId/sets
+ * 특정 기구의 세트 수만 변경
+ */
+router.patch('/:routineId/exercises/:equipmentId/sets', auth(), asyncRoute(async (req, res) => {
+  const routineId = parseInt(req.params.routineId, 10);
+  const equipmentId = parseInt(req.params.equipmentId, 10);
+  const { targetSets } = req.body;
+
+  if (!targetSets || targetSets < 1 || targetSets > 20) {
+    return res.status(400).json({ error: '세트 수는 1~20 사이여야 합니다' });
+  }
+
+  // 운동 찾기 및 소유권 확인
+  const exercise = await prisma.routineExercise.findFirst({
+    where: { 
+      routineId, 
+      equipmentId,
+      routine: { userId: req.user.id }
+    },
+    include: { equipment: true }
+  });
+
+  if (!exercise) {
+    return res.status(404).json({ error: '루틴에 해당 기구가 없습니다' });
+  }
+
+  // 세트 수 업데이트
+  const updated = await prisma.routineExercise.update({
+    where: { id: exercise.id },
+    data: { targetSets }
+  });
+
+  res.json({
+    message: `${exercise.equipment.name} 세트 수가 변경되었습니다`,
+    equipmentName: exercise.equipment.name,
+    previousSets: exercise.targetSets,
+    newSets: updated.targetSets
+  });
+}));
+
+/**
+ * PATCH /api/routines/:routineId/exercises/:equipmentId/rest
+ * 특정 기구의 휴식 시간만 변경
+ */
+router.patch('/:routineId/exercises/:equipmentId/rest', auth(), asyncRoute(async (req, res) => {
+  const routineId = parseInt(req.params.routineId, 10);
+  const equipmentId = parseInt(req.params.equipmentId, 10);
+  const { restSeconds } = req.body;
+
+  if (restSeconds === undefined || restSeconds < 0 || restSeconds > 900) {
+    return res.status(400).json({ error: '휴식 시간은 0~900초 사이여야 합니다' });
+  }
+
+  // 운동 찾기 및 소유권 확인
+  const exercise = await prisma.routineExercise.findFirst({
+    where: { 
+      routineId, 
+      equipmentId,
+      routine: { userId: req.user.id }
+    },
+    include: { equipment: true }
+  });
+
+  if (!exercise) {
+    return res.status(404).json({ error: '루틴에 해당 기구가 없습니다' });
+  }
+
+  // 휴식 시간 업데이트
+  const updated = await prisma.routineExercise.update({
+    where: { id: exercise.id },
+    data: { restSeconds }
+  });
+
+  res.json({
+    message: `${exercise.equipment.name} 휴식 시간이 변경되었습니다`,
+    equipmentName: exercise.equipment.name,
+    previousRest: exercise.restSeconds,
+    newRest: updated.restSeconds,
+    restMinutes: Math.round(updated.restSeconds / 60)
+  });
+}));
+
+/**
+ * PATCH /api/routines/:routineId/exercises/:equipmentId/order
+ * 특정 기구의 순서 변경
+ */
+router.patch('/:routineId/exercises/:equipmentId/order', auth(), asyncRoute(async (req, res) => {
+  const routineId = parseInt(req.params.routineId, 10);
+  const equipmentId = parseInt(req.params.equipmentId, 10);
+  const { newOrder } = req.body;
+
+  if (!newOrder || newOrder < 1) {
+    return res.status(400).json({ error: '올바른 순서를 입력하세요 (1 이상)' });
+  }
+
+  // 루틴 소유권 확인
+  const routine = await prisma.workoutRoutine.findFirst({
+    where: { id: routineId, userId: req.user.id },
+    include: {
+      exercises: {
+        include: { equipment: true },
+        orderBy: { order: 'asc' }
+      }
+    }
+  });
+
+  if (!routine) {
+    return res.status(404).json({ error: '루틴을 찾을 수 없습니다' });
+  }
+
+  // 대상 운동 찾기
+  const targetExercise = routine.exercises.find(ex => ex.equipmentId === equipmentId);
+  
+  if (!targetExercise) {
+    return res.status(404).json({ error: '루틴에 해당 기구가 없습니다' });
+  }
+
+  const maxOrder = routine.exercises.length;
+  const finalNewOrder = Math.min(newOrder, maxOrder);
+  const oldOrder = targetExercise.order;
+
+  if (oldOrder === finalNewOrder) {
+    return res.json({
+      message: '순서가 변경되지 않았습니다',
+      equipmentName: targetExercise.equipment.name,
+      order: oldOrder
+    });
+  }
+
+  // 순서 재정렬
+  await prisma.$transaction(async (tx) => {
+    if (finalNewOrder < oldOrder) {
+      // 위로 이동: 사이 운동들을 아래로
+      await tx.routineExercise.updateMany({
+        where: {
+          routineId,
+          order: { gte: finalNewOrder, lt: oldOrder }
+        },
+        data: { order: { increment: 1 } }
+      });
+    } else {
+      // 아래로 이동: 사이 운동들을 위로
+      await tx.routineExercise.updateMany({
+        where: {
+          routineId,
+          order: { gt: oldOrder, lte: finalNewOrder }
+        },
+        data: { order: { decrement: 1 } }
+      });
+    }
+
+    // 대상 운동 순서 변경
+    await tx.routineExercise.update({
+      where: { id: targetExercise.id },
+      data: { order: finalNewOrder }
+    });
+  });
+
+  res.json({
+    message: `${targetExercise.equipment.name} 순서가 변경되었습니다`,
+    equipmentName: targetExercise.equipment.name,
+    previousOrder: oldOrder,
+    newOrder: finalNewOrder
+  });
+}));
+
 module.exports = router;
