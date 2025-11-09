@@ -3,24 +3,16 @@ const prisma = require('../lib/prisma');
 const eventBus = require('../events/eventBus');
 
 /**
- * 알림 타입별 카테고리 매핑
+ * 알림 타입별 카테고리 매핑 (3가지만)
  */
 const NOTIFICATION_CATEGORIES = {
-  // 대기열 관련
+  // 사용 가능 알림
   EQUIPMENT_AVAILABLE: 'queue',
-  QUEUE_CANCELLED_CONFIRMATION: 'queue',
+  
+  // 대기 만료 알림
   QUEUE_EXPIRED: 'queue',
   
-  // 운동 관련
-  REST_STARTED: 'workout',
-  NEXT_SET_STARTED: 'workout',
-  REST_SKIPPED: 'workout',
-  EXERCISE_STOPPED: 'workout',
-  WORKOUT_COMPLETED: 'workout',
-  
-  // ETA/대기자 수 관련
-  AUTO_ETA_UPDATE: 'eta',
-  ETA_UPDATED: 'eta',
+  // 대기자 수 알림
   WAITING_COUNT: 'eta',
 };
 
@@ -28,28 +20,26 @@ const NOTIFICATION_CATEGORIES = {
  * 알림 우선순위 (높을수록 중요)
  */
 const NOTIFICATION_PRIORITY = {
-  EQUIPMENT_AVAILABLE: 10,
-  WORKOUT_COMPLETED: 9,
+  EQUIPMENT_AVAILABLE: 10,      // 가장 중요
   QUEUE_EXPIRED: 8,
-  EXERCISE_STOPPED: 7,
-  REST_STARTED: 6,
-  NEXT_SET_STARTED: 5,
   WAITING_COUNT: 4,
-  ETA_UPDATED: 3,
-  AUTO_ETA_UPDATE: 2,
-  QUEUE_CANCELLED_CONFIRMATION: 6,
-  REST_SKIPPED: 5,
 };
 
 /**
- * 알림을 DB에 저장
+ * 알림을 DB에 저장 (3가지 타입만 저장)
  */
 async function saveNotification(userId, payload) {
   try {
-    const category = NOTIFICATION_CATEGORIES[payload.type] || 'other';
+    // 허용된 타입이 아니면 저장하지 않음
+    if (!NOTIFICATION_CATEGORIES[payload.type]) {
+      console.log(`[Notification] Skipped saving non-allowed type: ${payload.type}`);
+      return null;
+    }
+
+    const category = NOTIFICATION_CATEGORIES[payload.type];
     const priority = NOTIFICATION_PRIORITY[payload.type] || 5;
 
-    // 메타데이터 정리 (title, message, type 제외한 나머지)
+    // 메타데이터 정리
     const { type, title, message, equipmentId, equipmentName, queueId, ...metadata } = payload;
 
     const notification = await prisma.notification.create({
@@ -115,9 +105,9 @@ async function getNotifications(userId, options = {}) {
     prisma.notification.findMany({
       where,
       orderBy: [
-        { isRead: 'asc' }, // 안읽은 것 먼저
-        { priority: 'desc' }, // 우선순위 높은 것 먼저
-        { createdAt: 'desc' }, // 최신순
+        { isRead: 'asc' },        // 안읽은 것 먼저
+        { priority: 'desc' },     // 우선순위 높은 것 먼저
+        { createdAt: 'desc' },    // 최신순
       ],
       take: limit,
       skip: offset,
@@ -164,8 +154,8 @@ async function markAsRead(userId, notificationIds) {
  */
 async function markAllAsRead(userId, options = {}) {
   const { category, equipmentId } = options;
-
   const where = { userId, isRead: false };
+
   if (category) where.category = category;
   if (equipmentId) where.equipmentId = equipmentId;
 
@@ -224,13 +214,15 @@ async function getNotificationStats(userId) {
 
 /**
  * 알림 전송 + DB 저장 (이벤트 버스 사용)
- * WebSocket 의존성 제거 - 이벤트로 발행만 함
+ * 3가지 타입만 저장, 나머지는 WebSocket으로만 전송
  */
 async function sendAndSaveNotification(userId, payload) {
-  // 1. DB에 저장
-  await saveNotification(userId, payload);
+  // 1. 허용된 타입만 DB에 저장
+  if (NOTIFICATION_CATEGORIES[payload.type]) {
+    await saveNotification(userId, payload);
+  }
   
-  // 2. 이벤트 발행 (WebSocket은 이벤트를 구독해서 처리)
+  // 2. 모든 타입의 알림은 WebSocket으로 전송 (이벤트 발행)
   eventBus.emitNotification(userId, payload);
   
   return true;

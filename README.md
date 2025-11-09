@@ -1759,6 +1759,13 @@ ws.onmessage = (event) => {
   "equipmentId": 1
 }
 ```
+### 알림 리스트에 저장되는 타입 (3가지)
+1. **EQUIPMENT_AVAILABLE** (우선순위 10) - 대기한 기구 사용 가능 | 카테고리: queue
+2. **QUEUE_EXPIRED** (우선순위 8) - 대기 시간 초과로 제외됨 | 카테고리: queue
+3. **WAITING_COUNT** (우선순위 4) - 내 뒤 대기자 수 알림 | 카테고리: eta
+
+**참고**: 나머지 알림(휴식 시작, 다음 세트, 운동 완료 등)은 WebSocket으로만 실시간 전송되며 이력에 저장되지 않습니다.
+
 ### 알림 리스트 타입 목록
 알림 타입 목록
 1. EQUIPMENT_AVAILABLE (우선순위 10)
