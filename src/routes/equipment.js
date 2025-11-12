@@ -22,8 +22,9 @@ const asyncRoute = require('../utils/asyncRoute');
 const prisma = require('../lib/prisma');
 
 // GET /api/equipment
+// GET /api/equipment
 router.get('/', asyncRoute(async (req, res) => {
-  const { category, search, include_status = 'true' } = req.query;
+  const { category, search, include_status = 'true', sort_by } = req.query; // sort_by 추가
   const { userId } = authOptional(req);
 
   const where = {};
@@ -91,9 +92,32 @@ router.get('/', asyncRoute(async (req, res) => {
 
     const computed = statusMap.get(e.id) || {};
     const status = { ...baseStatus, ...computed };
-
     return { ...base, status };
   });
+
+  // 🆕 정렬 로직 추가
+  if (sort_by === 'available') {
+    response.sort((a, b) => {
+      // 1순위: 사용 가능 여부 (available 먼저)
+      if (a.status.isAvailable !== b.status.isAvailable) {
+        return a.status.isAvailable ? -1 : 1;
+      }
+      
+      // 2순위: 대기 인원 수 (적은 순)
+      if (a.status.waitingCount !== b.status.waitingCount) {
+        return a.status.waitingCount - b.status.waitingCount;
+      }
+      
+      // 3순위: 예상 대기시간 (짧은 순)
+      return a.status.estimatedWaitMinutes - b.status.estimatedWaitMinutes;
+    });
+  } else if (sort_by === 'waiting_asc') {
+    // 대기 인원 적은 순만
+    response.sort((a, b) => a.status.waitingCount - b.status.waitingCount);
+  } else if (sort_by === 'waiting_desc') {
+    // 대기 인원 많은 순
+    response.sort((a, b) => b.status.waitingCount - a.status.waitingCount);
+  }
 
   res.json(response);
 }));

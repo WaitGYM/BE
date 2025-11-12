@@ -19,6 +19,14 @@
 - **실시간 알림**: WebSocket을 통한 즉시 알림
 
 ## Backend API 문서
+### 추가 API 1112
+- **루틴 수정(멀티 수정)**
+  - `PATCH /api/routines/:routineId` — 여러 운동을 한 번에 수정/추가, 순서(order)를 통해 변경 가능
+  - `GET /api/equipment?include_status=true&sort_by=available` — 사용가능 우선 정렬 : status.isAvailable=true인 장비들이 위에, 같다면 waitingCount↑, 그래도 같으면 estimatedWaitMinutes↑ 순.
+  - `GET /api/equipment?include_status=true&sort_by=waiting_asc` — 대기 인원 적은 -> 많은
+  - `GET /api/equipment?include_status=true&sort_by=waiting_desc` — 대기 인원 많은 -> 적은
+   - `GET /api/equipment?include_status=true&category=다리&search=스쿼트&sort_by=available` — 검색/카테고리 필터 조합
+
 ### 추가API 1108
 - **루틴 수정(부분 변경) 전용 엔드포인트**
   - `PATCH /api/routines/:routineId/name` — 루틴 이름만 변경
@@ -98,6 +106,192 @@
 - `GET /api/routines/active-usage/status`- 현재 운동 상태 True/False
 
 # 📋 요청 바디, 응답 바디
+## 추가 API 1112
+-  `PATCH /api/routines/:routineId` - 루틴 수정(멀티 수정)
+- 기존 루틴:
+```json
+ {
+    "id": 10,
+    "name": "기본 루틴",
+    "isActive": false,
+    "exerciseCount": 3,
+    "exercises": [
+        {
+            "id": 49,
+            "routineId": 10,
+            "equipmentId": 12,
+            "order": 1,
+            "targetSets": 4,
+            "targetReps": "8-12",
+            "restSeconds": 180,
+            "notes": "스미스 머신 - 무게 점진적으로 증가",
+            "createdAt": "2025-11-12T04:43:41.958Z",
+            "equipment": {
+                "id": 12,
+                "name": "스미스 머신",
+                "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-smith.png",
+                "category": "다리",
+                "muscleGroup": "대퇴사두근, 둔근, 햄스트링, 내전근",
+                "createdAt": "2025-09-29T06:43:19.261Z"
+            }
+        },
+        {
+            "id": 50,
+            "routineId": 10,
+            "equipmentId": 16,
+            "order": 2,
+            "targetSets": 3,
+            "targetReps": "10-15",
+            "restSeconds": 120,
+            "notes": "레그프레스",
+            "createdAt": "2025-11-12T04:43:41.958Z",
+            "equipment": {
+                "id": 16,
+                "name": "레그프레스",
+                "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-legpress.png",
+                "category": "다리",
+                "muscleGroup": "대퇴사두근, 둔근",
+                "createdAt": "2025-09-29T06:43:19.360Z"
+            }
+        },
+        {
+            "id": 51,
+            "routineId": 10,
+            "equipmentId": 17,
+            "order": 3,
+            "targetSets": 3,
+            "targetReps": "12-15",
+            "restSeconds": 90,
+            "notes": "레그컬 - 마지막 세트 드롭셋",
+            "createdAt": "2025-11-12T04:43:41.958Z",
+            "equipment": {
+                "id": 17,
+                "name": "레그컬",
+                "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-legcurl.png",
+                "category": "다리",
+                "muscleGroup": "햄스트링",
+                "createdAt": "2025-09-29T06:43:19.372Z"
+            }
+        }
+    ],
+    "createdAt": "2025-11-12T04:43:41.906Z",
+    "updatedAt": "2025-11-12T04:43:41.906Z"
+}
+  ```
+- 요청 바디
+  ```json
+  {
+  "exercises": [
+    {
+      "equipmentId": 18,
+      "targetSets": 2,
+      "targetReps": "10",
+      "restSeconds": 270,
+      "notes": "스미스머신"
+    },
+    {
+      "equipmentId": 17,
+      "order": 1,
+      "targetSets": 2
+    }
+     ]
+  }
+
+  ```
+- 응답(예시)
+  ```json
+  {
+    "message": "1개 운동 수정, 1개 운동 추가",
+    "routine": {
+        "id": 10,
+        "userId": 1,
+        "name": "기본 루틴",
+        "isActive": false,
+        "createdAt": "2025-11-12T04:43:41.906Z",
+        "updatedAt": "2025-11-12T04:43:41.906Z",
+        "exercises": [
+            {
+                "id": 51,
+                "routineId": 10,
+                "equipmentId": 17,
+                "order": 1,
+                "targetSets": 2,
+                "targetReps": "12-15",
+                "restSeconds": 90,
+                "notes": "레그컬 - 마지막 세트 드롭셋",
+                "createdAt": "2025-11-12T04:43:41.958Z",
+                "equipment": {
+                    "id": 17,
+                    "name": "레그컬",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-legcurl.png",
+                    "category": "다리",
+                    "muscleGroup": "햄스트링",
+                    "createdAt": "2025-09-29T06:43:19.372Z"
+                }
+            },
+            {
+                "id": 49,
+                "routineId": 10,
+                "equipmentId": 12,
+                "order": 2,
+                "targetSets": 4,
+                "targetReps": "8-12",
+                "restSeconds": 180,
+                "notes": "스미스 머신 - 무게 점진적으로 증가",
+                "createdAt": "2025-11-12T04:43:41.958Z",
+                "equipment": {
+                    "id": 12,
+                    "name": "스미스 머신",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-smith.png",
+                    "category": "다리",
+                    "muscleGroup": "대퇴사두근, 둔근, 햄스트링, 내전근",
+                    "createdAt": "2025-09-29T06:43:19.261Z"
+                }
+            },
+            {
+                "id": 50,
+                "routineId": 10,
+                "equipmentId": 16,
+                "order": 3,
+                "targetSets": 3,
+                "targetReps": "10-15",
+                "restSeconds": 120,
+                "notes": "레그프레스",
+                "createdAt": "2025-11-12T04:43:41.958Z",
+                "equipment": {
+                    "id": 16,
+                    "name": "레그프레스",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-legpress.png",
+                    "category": "다리",
+                    "muscleGroup": "대퇴사두근, 둔근",
+                    "createdAt": "2025-09-29T06:43:19.360Z"
+                }
+            },
+            {
+                "id": 53,
+                "routineId": 10,
+                "equipmentId": 18,
+                "order": 4,
+                "targetSets": 2,
+                "targetReps": "10",
+                "restSeconds": 270,
+                "notes": "스미스머신",
+                "createdAt": "2025-11-12T04:46:16.273Z",
+                "equipment": {
+                    "id": 18,
+                    "name": "풀업",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-pullup.png",
+                    "category": "등",
+                    "muscleGroup": "광배근, 이두, 어깨",
+                    "createdAt": "2025-09-29T06:43:19.391Z"
+                }
+            }
+        ]
+    }
+  }
+  
+  ```
+
 ## 추가된 API 1108
 ### 1. **루틴 수정(부분 변경) 전용 엔드포인트**
   - `PATCH /api/routines/:routineId/name` — 루틴 이름만 변경
