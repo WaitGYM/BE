@@ -6,6 +6,63 @@ const asyncRoute = require('../utils/asyncRoute');
 
 const prisma = require('../lib/prisma');
 
+/**
+ * order 재정렬 헬퍼 함수
+ * order 값이 중복되거나 빈 공간이 있을 때 1, 2, 3... 순서로 재정렬
+ */
+// ✅ 개선된 reorderExercises: 현재 order를 기준으로 재정렬
+/**
+ * order 재정렬 헬퍼 함수
+ * order 값이 중복되거나 빈 공간이 있을 때 1, 2, 3... 순서로 재정렬
+ */
+async function reorderExercises(tx, routineId, preferredMoves = []) {
+  const rows = await tx.routineExercise.findMany({
+    where: { routineId },
+    select: { id: true, order: true },
+    orderBy: { order: 'asc' },
+  });
+  if (rows.length === 0) return;
+
+  // 현재 순서 배열 (id만)
+  const ordered = rows.map(r => r.id);
+  const N = ordered.length;
+  const clamp = (n) => Math.max(1, Math.min(n, N));
+
+  // 같은 id에 대한 중복 move는 "마지막 지시만" 남기되,
+  // 적용은 preferredMoves가 들어온 원래 순서를 최대한 존중
+  const seen = new Set();
+  const deduped = [];
+  for (let i = preferredMoves.length - 1; i >= 0; i--) {
+    const mv = preferredMoves[i];
+    if (!mv || typeof mv.id !== 'number' || typeof mv.order !== 'number') continue;
+    if (seen.has(mv.id)) continue;
+    seen.add(mv.id);
+    deduped.unshift({ id: mv.id, order: mv.order });
+  }
+
+  // 컷-인서트 적용
+  for (const { id, order } of deduped) {
+    const fromIdx = ordered.indexOf(id);
+    if (fromIdx === -1) continue;
+    ordered.splice(fromIdx, 1); // 잘라내기
+    const insertIdx = Math.min(clamp(order) - 1, ordered.length);
+    ordered.splice(insertIdx, 0, id); // 끼워 넣기
+  }
+
+  // 충돌 회피용 +1000 후 1..N 재부여
+  await tx.routineExercise.updateMany({
+    where: { routineId },
+    data: { order: { increment: 1000 } },
+  });
+  for (let i = 0; i < ordered.length; i++) {
+    await tx.routineExercise.update({
+      where: { id: ordered[i] },
+      data: { order: i + 1 },
+    });
+  }
+}
+
+//조회 API : GET
 // GET /api/routines
 router.get('/', auth(), asyncRoute(async (req, res) => {
   const { isActive } = req.query;
@@ -111,6 +168,7 @@ router.get('/:id', auth(), asyncRoute(async (req, res) => {
   });
 }));
 
+//생성API : POST
 // POST /api/routines
 router.post('/', auth(), asyncRoute(async (req, res) => {
   const v = createRoutineSchema.safeParse(req.body);
@@ -151,33 +209,197 @@ router.post('/', auth(), asyncRoute(async (req, res) => {
   });
 }));
 
-// PUT /api/routines/:id
+/**
+ * PATCH /api/routines/:id
+ * 루틴의 운동을 부분적으로 수정/추가
+ * - 기존 equipmentId → 수정
+ * - 새로운 equipmentId → 추가 (맨 뒤로)
+ */
+// 수정된 PATCH /api/routines/:id
+// 수정된 PATCH /api/routines/:id
+router.patch('/:id', auth(), asyncRoute(async (req, res) => {
+  const routineId = parseInt(req.params.id, 10);
+  const { name, isActive, exercises } = req.body;
+
+  // 루틴 소유권 + 현재 운동 조회
+  const routine = await prisma.workoutRoutine.findFirst({
+    where: { id: routineId, userId: req.user.id },
+    include: {
+      exercises: {
+        include: { equipment: true },
+        orderBy: { order: 'asc' },
+      },
+    },
+  });
+  if (!routine) return res.status(404).json({ error: '루틴을 찾을 수 없습니다' });
+
+  const updated = await prisma.$transaction(async (tx) => {
+    // 1) 루틴 기본 정보 수정
+    if (name !== undefined || isActive !== undefined) {
+      await tx.workoutRoutine.update({
+        where: { id: routineId },
+        data: {
+          ...(name !== undefined && { name }),
+          ...(isActive !== undefined && { isActive }),
+          updatedAt: new Date(),
+        },
+      });
+    }
+
+    // 2) 운동 수정/추가 + 순서 이동
+    let added = 0;
+    let modified = 0;
+
+    if (Array.isArray(exercises) && exercises.length > 0) {
+      // 트랜잭션 기준 최신 상태 확보
+      let current = await tx.routineExercise.findMany({
+        where: { routineId },
+        include: { equipment: true },
+        orderBy: { order: 'asc' },
+      });
+      const byEquipId = new Map(current.map(e => [e.equipmentId, e]));
+
+      // === 0-based 입력 정규화 판단 ===
+      const incomingOrderNums = exercises
+        .filter(e => e && e.order !== undefined && e.order !== null)
+        .map(e => Number(e.order))
+        .filter(Number.isFinite);
+      const zeroBased = incomingOrderNums.length > 0 && Math.min(...incomingOrderNums) === 0;
+
+      const normalizeOrder = (ord, maxLen) => {
+        if (ord === undefined || ord === null) return undefined;
+        const n = Number(ord);
+        if (!Number.isFinite(n)) return undefined;
+        const oneBased = zeroBased ? n + 1 : n;
+        // 1..N 범위로 클램프
+        const N = Math.max(1, maxLen);
+        return Math.max(1, Math.min(oneBased, N));
+      };
+
+      // 임시 큰 순번(충돌 회피용)
+      const curMax = current.length ? Math.max(...current.map(e => e.order)) : 0;
+      let tempOrderSeed = curMax + 100;
+
+      // 마지막에 한 번에 적용할 "희망 이동 목록"
+      const preferredMoves = [];
+
+      for (const item of exercises) {
+        if (!item || typeof item.equipmentId !== 'number') continue;
+
+        const { equipmentId, order, targetSets, targetReps, restSeconds, notes } = item;
+
+        // 기구 검증
+        const eq = await tx.equipment.findUnique({ where: { id: equipmentId } });
+        if (!eq) throw new Error(`기구 ID ${equipmentId}를 찾을 수 없습니다`);
+
+        const exist = byEquipId.get(equipmentId);
+
+        if (exist) {
+          // 순서 제외 필드만 즉시 업데이트 (0도 허용이므로 undefined/null만 거르기)
+          const updateData = {};
+          if (targetSets !== undefined) updateData.targetSets = targetSets;
+          if (targetReps !== undefined) updateData.targetReps = targetReps;
+          if (restSeconds !== undefined) updateData.restSeconds = restSeconds;
+          if (notes !== undefined) updateData.notes = notes;
+
+          if (Object.keys(updateData).length > 0) {
+            await tx.routineExercise.update({ where: { id: exist.id }, data: updateData });
+            modified++;
+          }
+
+          // 순서는 일괄 재정렬에서 컷-인서트로 처리
+          const norm = normalizeOrder(order, current.length);
+          if (norm !== undefined) preferredMoves.push({ id: exist.id, order: norm });
+
+        } else {
+          // 신규는 임시 큰 순번으로 생성
+          const created = await tx.routineExercise.create({
+            data: {
+              routineId,
+              equipmentId,
+              order: tempOrderSeed++,          // 충돌 회피
+              targetSets: targetSets ?? 3,
+              targetReps,
+              restSeconds: restSeconds ?? 180,
+              notes,
+            },
+            include: { equipment: true },
+          });
+          added++;
+          current.push(created);
+          byEquipId.set(equipmentId, created);
+
+          const norm = normalizeOrder(order, current.length);
+          if (norm !== undefined) preferredMoves.push({ id: created.id, order: norm });
+        }
+      }
+
+      // === 마지막에 한 번에 컷-인서트 재정렬 ===
+      await reorderExercises(tx, routineId, preferredMoves);
+    }
+
+    // 최신 상태 반환
+    const fresh = await tx.workoutRoutine.findUnique({
+      where: { id: routineId },
+      include: {
+        exercises: {
+          include: { equipment: true },
+          orderBy: { order: 'asc' },
+        },
+      },
+    });
+
+    // 응답 메시지
+    let message = '루틴이 수정되었습니다';
+    if (Array.isArray(exercises) && exercises.length > 0) {
+      if (added > 0 && modified > 0) message = `${modified}개 운동 수정, ${added}개 운동 추가`;
+      else if (added > 0) message = `${added}개 운동이 추가되었습니다`;
+      else if (modified > 0) message = `${modified}개 운동이 수정되었습니다`;
+    }
+
+    return { message, routine: fresh };
+  }); // tx 끝
+
+  res.json(updated);
+}));
+
+
+// PUT /api/routines/:id - 기존 방식 (전체 교체)
 router.put('/:id', auth(), asyncRoute(async (req, res) => {
   const routineId = parseInt(req.params.id, 10);
   const v = updateRoutineSchema.safeParse(req.body);
   if (!v.success) return res.status(400).json({ error: '입력 데이터가 올바르지 않습니다', details: v.error.issues });
 
   const { name, isActive, exercises } = v.data;
-  const existing = await prisma.workoutRoutine.findFirst({ where: { id: routineId, userId: req.user.id } });
+  
+  const existing = await prisma.workoutRoutine.findFirst({ 
+    where: { id: routineId, userId: req.user.id }
+  });
   if (!existing) return res.status(404).json({ error: '루틴을 찾을 수 없습니다' });
 
   const updated = await prisma.$transaction(async (tx) => {
     await tx.workoutRoutine.update({
       where: { id: routineId },
-      data: { ...(name !== undefined && { name }), ...(isActive !== undefined && { isActive }), updatedAt: new Date() }
+      data: { 
+        ...(name !== undefined && { name }), 
+        ...(isActive !== undefined && { isActive }), 
+        updatedAt: new Date() 
+      }
     });
 
     if (exercises) {
+      // 전체 삭제 후 재생성
       await tx.routineExercise.deleteMany({ where: { routineId } });
+      
       if (exercises.length) {
         await tx.routineExercise.createMany({
           data: exercises.map((e, i) => ({
             routineId,
             equipmentId: e.equipmentId,
-            order: i + 1,
+            order: e.order ?? (i + 1),
             targetSets: e.targetSets ?? 3,
             targetReps: e.targetReps,
-            restSeconds: e.restSeconds ?? 180, // 기본값 180초 (3분)
+            restSeconds: e.restSeconds ?? 180,
             notes: e.notes,
           })),
         });
