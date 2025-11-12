@@ -19,6 +19,12 @@
 - **실시간 알림**: WebSocket을 통한 즉시 알림
 
 ## Backend API 문서
+### 추가 API 1113
+- **루틴에서의 대기 등록**
+  - `POST /api/routines/:routineId/queue/:equipmentId` — 루틴에서 특정 운동 대기 등록
+  - `POST /api/routines/:routineId/queue-next` — 루틴의 다음 운동 자동 대기 등록
+  - `GET /api/routines/:routineId/queue-status` — 루틴 전체 운동의 대기 상태 조회
+  
 ### 추가 API 1112
 - **루틴 수정(멀티 수정)**
   - `PATCH /api/routines/:routineId` — 여러 운동을 한 번에 수정/추가, 순서(order)를 통해 변경 가능
@@ -106,6 +112,195 @@
 - `GET /api/routines/active-usage/status`- 현재 운동 상태 True/False
 
 # 📋 요청 바디, 응답 바디
+## 추가 API 1113
+- **루틴에서의 대기 등록**
+- 루틴 아이디 : 9
+- 기존 루틴 기구 순서 : 17 -> 14 -> 12 -> 16 -> 18
+
+  - `POST /api/routines/:routineId/queue/:equipmentId` — 루틴에서 특정 운동 대기 등록
+ 
+  - 응답 바디 : 루틴 Id : 9, equipment_id : 12
+  ```json
+  {
+      "message": "기본 루틴: 스미스 머신 대기열에 등록되었습니다",
+      "routine": {
+          "id": 9,
+          "name": "기본 루틴"
+      },
+      "equipment": {
+          "id": 12,
+          "name": "스미스 머신",
+          "category": "다리",
+          "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-smith.png"
+      },
+      "queue": {
+          "queueId": 8,
+          "queuePosition": 1,
+          "estimatedWaitMinutes": 0
+      },
+      "exerciseInfo": {
+          "order": 3,
+          "targetSets": 4,
+          "targetReps": "8-12",
+          "restSeconds": 180,
+          "notes": "스미스 머신 - 무게 점진적으로 증가"
+      }
+  }
+  ```
+
+  - `POST /api/routines/:routineId/queue-next` — 루틴의 다음 운동 자동 대기 등록
+  
+  - 응답 바디 : 루틴에서 운동하고 있을시에만
+  ```json
+  {
+    "message": "다음 운동: 케이블머신 대기열 등록",
+    "routine": {
+        "id": 9,
+        "name": "기본 루틴"
+    },
+    "currentExercise": {
+        "equipmentId": 17,
+        "equipmentName": "레그컬",
+        "order": 1
+    },
+    "nextExercise": {
+        "equipmentId": 14,
+        "equipmentName": "케이블머신",
+        "order": 2,
+        "targetSets": 3,
+        "restSeconds": 180
+    },
+    "queue": {
+        "queueId": 9,
+        "queuePosition": 1,
+        "estimatedWaitMinutes": 0
+    }
+  }
+  ```
+
+  - `GET /api/routines/:routineId/queue-status` — 루틴 전체 운동의 대기 상태 조회
+ 
+  - 응답 바디
+  ```json
+  {
+    "routineId": 9,
+    "routineName": "기본 루틴",
+    "isActive": true,
+    "exercises": [
+        {
+            "exerciseId": 47,
+            "order": 1,
+            "equipment": {
+                "id": 17,
+                "name": "레그컬",
+                "category": "다리",
+                "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-legcurl.png"
+            },
+            "targetSets": 2,
+            "restSeconds": 90,
+            "status": {
+                "isAvailable": false,
+                "currentUser": "박수현",
+                "waitingCount": 0,
+                "myQueuePosition": null,
+                "myQueueStatus": null,
+                "myQueueId": null,
+                "canQueue": true
+            }
+        },
+        {
+            "exerciseId": 48,
+            "order": 2,
+            "equipment": {
+                "id": 14,
+                "name": "케이블머신",
+                "category": "어깨",
+                "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-cable.png"
+            },
+            "targetSets": 3,
+            "restSeconds": 180,
+            "status": {
+                "isAvailable": true,
+                "currentUser": null,
+                "waitingCount": 1,
+                "myQueuePosition": 1,
+                "myQueueStatus": "WAITING",
+                "myQueueId": 9,
+                "canQueue": false
+            }
+        },
+        {
+            "exerciseId": 45,
+            "order": 3,
+            "equipment": {
+                "id": 12,
+                "name": "스미스 머신",
+                "category": "다리",
+                "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-smith.png"
+            },
+            "targetSets": 4,
+            "restSeconds": 180,
+            "status": {
+                "isAvailable": true,
+                "currentUser": null,
+                "waitingCount": 1,
+                "myQueuePosition": 1,
+                "myQueueStatus": "WAITING",
+                "myQueueId": 8,
+                "canQueue": false
+            }
+        },
+        {
+            "exerciseId": 46,
+            "order": 4,
+            "equipment": {
+                "id": 16,
+                "name": "레그프레스",
+                "category": "다리",
+                "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-legpress.png"
+            },
+            "targetSets": 3,
+            "restSeconds": 120,
+            "status": {
+                "isAvailable": true,
+                "currentUser": null,
+                "waitingCount": 0,
+                "myQueuePosition": null,
+                "myQueueStatus": null,
+                "myQueueId": null,
+                "canQueue": false
+            }
+        },
+        {
+            "exerciseId": 52,
+            "order": 5,
+            "equipment": {
+                "id": 18,
+                "name": "풀업",
+                "category": "등",
+                "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-pullup.png"
+            },
+            "targetSets": 2,
+            "restSeconds": 270,
+            "status": {
+                "isAvailable": true,
+                "currentUser": null,
+                "waitingCount": 0,
+                "myQueuePosition": null,
+                "myQueueStatus": null,
+                "myQueueId": null,
+                "canQueue": false
+            }
+        }
+    ],
+    "summary": {
+        "totalExercises": 5,
+        "availableCount": 4,
+        "myQueuedCount": 2
+    }
+  }
+  ```
+
 ## 추가 API 1112
 -  `PATCH /api/routines/:routineId` - 루틴 수정(멀티 수정)
 - 기존 루틴:
