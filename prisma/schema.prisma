@@ -139,7 +139,8 @@ model RoutineExercise {
   routine   WorkoutRoutine @relation(fields: [routineId], references: [id], onDelete: Cascade)
   equipment Equipment      @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
 
-  @@unique([routineId, equipmentId]) // 한 루틴에 같은 기구 중복 방지
+ // 한 루틴에 같은 기구 중복 방지
+  @@unique([routineId, order]) //한 루틴에서 순서는 중복 불가
   @@index([routineId, order])
 }
 
