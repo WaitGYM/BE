@@ -368,51 +368,108 @@ router.patch('/:id', auth(), asyncRoute(async (req, res) => {
 router.put('/:id', auth(), asyncRoute(async (req, res) => {
   const routineId = parseInt(req.params.id, 10);
   const v = updateRoutineSchema.safeParse(req.body);
-  if (!v.success) return res.status(400).json({ error: '입력 데이터가 올바르지 않습니다', details: v.error.issues });
+  
+  if (!v.success) {
+    return res.status(400).json({ 
+      error: '입력 데이터가 올바르지 않습니다', 
+      details: v.error.issues 
+    });
+  }
 
   const { name, isActive, exercises } = v.data;
-  
-  const existing = await prisma.workoutRoutine.findFirst({ 
-    where: { id: routineId, userId: req.user.id }
-  });
-  if (!existing) return res.status(404).json({ error: '루틴을 찾을 수 없습니다' });
 
+  // 루틴 소유권 확인
+  const existing = await prisma.workoutRoutine.findFirst({ 
+    where: { id: routineId, userId: req.user.id },
+    include: { exercises: true }
+  });
+  
+  if (!existing) {
+    return res.status(404).json({ error: '루틴을 찾을 수 없습니다' });
+  }
+
+  // 🆕 exercises가 제공된 경우, 기구 존재 여부 검증
+  if (exercises && exercises.length > 0) {
+    const equipmentIds = exercises.map(e => e.equipmentId);
+    const existingEquipment = await prisma.equipment.count({ 
+      where: { id: { in: equipmentIds } } 
+    });
+    
+    if (existingEquipment !== equipmentIds.length) {
+      return res.status(400).json({ 
+        error: '존재하지 않는 기구가 포함되어 있습니다' 
+      });
+    }
+  }
+
+  // 트랜잭션으로 원자적 업데이트
   const updated = await prisma.$transaction(async (tx) => {
+    // 1. 루틴 기본 정보 업데이트
+    const updateData = { updatedAt: new Date() };
+    if (name !== undefined) updateData.name = name;
+    if (isActive !== undefined) updateData.isActive = isActive;
+
     await tx.workoutRoutine.update({
       where: { id: routineId },
-      data: { 
-        ...(name !== undefined && { name }), 
-        ...(isActive !== undefined && { isActive }), 
-        updatedAt: new Date() 
-      }
+      data: updateData
     });
 
-    if (exercises) {
-      // 전체 삭제 후 재생성
-      await tx.routineExercise.deleteMany({ where: { routineId } });
-      
-      if (exercises.length) {
+    // 2. 운동 목록이 제공된 경우, 전체 교체
+    if (exercises !== undefined) {
+      // 기존 운동 전체 삭제
+      await tx.routineExercise.deleteMany({ 
+        where: { routineId } 
+      });
+
+      // 새 운동 목록 생성 (order는 배열 순서대로)
+      if (exercises.length > 0) {
         await tx.routineExercise.createMany({
-          data: exercises.map((e, i) => ({
+          data: exercises.map((e, index) => ({
             routineId,
             equipmentId: e.equipmentId,
-            order: e.order ?? (i + 1),
+            order: index + 1, // 배열 순서가 곧 order
             targetSets: e.targetSets ?? 3,
-            targetReps: e.targetReps,
+            targetReps: e.targetReps ?? null,
             restSeconds: e.restSeconds ?? 180,
-            notes: e.notes,
+            notes: e.notes ?? null,
           })),
         });
       }
     }
 
+    // 3. 업데이트된 전체 루틴 반환
     return tx.workoutRoutine.findUnique({
       where: { id: routineId },
-      include: { exercises: { include: { equipment: true }, orderBy: { order: 'asc' } } }
+      include: { 
+        exercises: { 
+          include: { equipment: true }, 
+          orderBy: { order: 'asc' } 
+        },
+        _count: { select: { exercises: true } }
+      }
     });
   });
 
-  res.json(updated);
+  res.json({
+    message: '루틴이 성공적으로 업데이트되었습니다',
+    routine: {
+      id: updated.id,
+      name: updated.name,
+      isActive: updated.isActive,
+      exerciseCount: updated._count.exercises,
+      createdAt: updated.createdAt,
+      updatedAt: updated.updatedAt,
+      exercises: updated.exercises.map(ex => ({
+        id: ex.id,
+        order: ex.order,
+        targetSets: ex.targetSets,
+        targetReps: ex.targetReps,
+        restSeconds: ex.restSeconds,
+        notes: ex.notes,
+        equipment: ex.equipment
+      }))
+    }
+  });
 }));
 
 // 🆕 POST /api/routines/:id/exercises - 루틴에 운동 추가/업데이트
