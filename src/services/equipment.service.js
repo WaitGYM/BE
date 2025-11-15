@@ -28,20 +28,19 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
       prisma.equipmentUsage.findFirst({ where: { userId, status: 'IN_USE' } }),
     ]);
 
-    // ✅ endedAt 기준 + KST 자정 경계 + '완료 세션'만
-     const { rangeTodayKST } = require('../utils/time');
-     const { start, end } = rangeTodayKST();
-     const completed = await prisma.equipmentUsage.findMany({
-       where: {
-         userId,
-         equipmentId: { in: equipmentIds },
-         status: 'COMPLETED',
-         setStatus: 'COMPLETED',           // STOPPED 등 제외
-         endedAt: { gte: start, lte: end }, // KST 오늘
-       },
-       orderBy: { endedAt: 'desc' },
-       include: { user: { select: { name: true } } },
-     });
+    const { rangeTodayKST } = require('../utils/time');
+    const { start, end } = rangeTodayKST();
+    const completed = await prisma.equipmentUsage.findMany({
+      where: {
+        userId,
+        equipmentId: { in: equipmentIds },
+        status: 'COMPLETED',
+        // ❌ setStatus: 'COMPLETED', 조건 제거 (이 줄 삭제)
+        endedAt: { gte: start, lte: end },
+      },
+      orderBy: { endedAt: 'desc' },
+      include: { user: { select: { name: true } } },
+    });
 
     completed.forEach((u) => {
       if (!myCompletedToday.has(u.equipmentId)) {
