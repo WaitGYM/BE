@@ -19,6 +19,9 @@
 - **실시간 알림**: WebSocket을 통한 즉시 알림
 
 ## Backend API 문서
+### 수정 API 1119
+- **루틴 수정(멀티 수정)**
+  - `GET /api/routines` — 루틴 목록 응답에 estimatedMinutes 필드 추가
 ### 추가 API 1116
 - **루틴 수정(멀티 수정)**
   - `PUT /api/routines/:routineId` — 전체 루틴 수정
@@ -116,6 +119,242 @@
 - `GET /api/routines/active-usage/status`- 현재 운동 상태 True/False
 
 # 📋 요청 바디, 응답 바디
+## 수정 API 1119
+- **루틴 수정(멀티 수정)**
+  - `GET /api/routines` — 루틴 목록 응답에 estimatedMinutes 필드 추가
+  ```json
+  [
+    {
+        "id": 9,
+        "name": "기본 루틴",
+        "isActive": true,
+        "exerciseCount": 5,
+        "estimatedMinutes": 66,
+        "createdAt": "2025-11-12T02:30:46.953Z",
+        "updatedAt": "2025-11-12T17:24:51.558Z",
+        "exercises": [
+            {
+                "id": 47,
+                "order": 1,
+                "targetSets": 2,
+                "targetReps": "12-15",
+                "restSeconds": 90,
+                "notes": "레그컬 - 마지막 세트 드롭셋",
+                "equipment": {
+                    "id": 17,
+                    "name": "레그컬",
+                    "category": "다리",
+                    "muscleGroup": "햄스트링",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-legcurl.png"
+                }
+            },
+            {
+                "id": 48,
+                "order": 2,
+                "targetSets": 3,
+                "targetReps": null,
+                "restSeconds": 180,
+                "notes": null,
+                "equipment": {
+                    "id": 14,
+                    "name": "케이블머신",
+                    "category": "어깨",
+                    "muscleGroup": "삼각근, 승모근",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-cable.png"
+                }
+            },
+            {
+                "id": 45,
+                "order": 3,
+                "targetSets": 4,
+                "targetReps": "8-12",
+                "restSeconds": 180,
+                "notes": "스미스 머신 - 무게 점진적으로 증가",
+                "equipment": {
+                    "id": 12,
+                    "name": "스미스 머신",
+                    "category": "다리",
+                    "muscleGroup": "대퇴사두근, 둔근, 햄스트링, 내전근",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-smith.png"
+                }
+            },
+            {
+                "id": 46,
+                "order": 4,
+                "targetSets": 3,
+                "targetReps": "10-15",
+                "restSeconds": 120,
+                "notes": "레그프레스",
+                "equipment": {
+                    "id": 16,
+                    "name": "레그프레스",
+                    "category": "다리",
+                    "muscleGroup": "대퇴사두근, 둔근",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-legpress.png"
+                }
+            },
+            {
+                "id": 52,
+                "order": 5,
+                "targetSets": 2,
+                "targetReps": "10",
+                "restSeconds": 270,
+                "notes": "스미스머신",
+                "equipment": {
+                    "id": 18,
+                    "name": "풀업",
+                    "category": "등",
+                    "muscleGroup": "광배근, 이두, 어깨",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-pullup.png"
+                }
+            }
+        ]
+    },
+    {
+        "id": 11,
+        "name": "하체 새로운 루틴 - 추가",
+        "isActive": false,
+        "exerciseCount": 4,
+        "estimatedMinutes": 71,
+        "createdAt": "2025-11-15T16:57:29.128Z",
+        "updatedAt": "2025-11-15T18:25:37.538Z",
+        "exercises": [
+            {
+                "id": 64,
+                "order": 1,
+                "targetSets": 4,
+                "targetReps": null,
+                "restSeconds": 180,
+                "notes": null,
+                "equipment": {
+                    "id": 12,
+                    "name": "스미스 머신",
+                    "category": "다리",
+                    "muscleGroup": "대퇴사두근, 둔근, 햄스트링, 내전근",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-smith.png"
+                }
+            },
+            {
+                "id": 65,
+                "order": 2,
+                "targetSets": 3,
+                "targetReps": null,
+                "restSeconds": 120,
+                "notes": null,
+                "equipment": {
+                    "id": 16,
+                    "name": "레그프레스",
+                    "category": "다리",
+                    "muscleGroup": "대퇴사두근, 둔근",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-legpress.png"
+                }
+            },
+            {
+                "id": 66,
+                "order": 3,
+                "targetSets": 3,
+                "targetReps": null,
+                "restSeconds": 90,
+                "notes": null,
+                "equipment": {
+                    "id": 17,
+                    "name": "레그컬",
+                    "category": "다리",
+                    "muscleGroup": "햄스트링",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-legcurl.png"
+                }
+            },
+            {
+                "id": 67,
+                "order": 4,
+                "targetSets": 4,
+                "targetReps": null,
+                "restSeconds": 270,
+                "notes": null,
+                "equipment": {
+                    "id": 18,
+                    "name": "풀업",
+                    "category": "등",
+                    "muscleGroup": "광배근, 이두, 어깨",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-pullup.png"
+                }
+            }
+        ]
+    },
+    {
+        "id": 10,
+        "name": "기본 루틴",
+        "isActive": false,
+        "exerciseCount": 4,
+        "estimatedMinutes": 51,
+        "createdAt": "2025-11-12T04:43:41.906Z",
+        "updatedAt": "2025-11-12T04:43:41.906Z",
+        "exercises": [
+            {
+                "id": 51,
+                "order": 1,
+                "targetSets": 2,
+                "targetReps": "12-15",
+                "restSeconds": 90,
+                "notes": "레그컬 - 마지막 세트 드롭셋",
+                "equipment": {
+                    "id": 17,
+                    "name": "레그컬",
+                    "category": "다리",
+                    "muscleGroup": "햄스트링",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-legcurl.png"
+                }
+            },
+            {
+                "id": 49,
+                "order": 2,
+                "targetSets": 4,
+                "targetReps": "8-12",
+                "restSeconds": 180,
+                "notes": "스미스 머신 - 무게 점진적으로 증가",
+                "equipment": {
+                    "id": 12,
+                    "name": "스미스 머신",
+                    "category": "다리",
+                    "muscleGroup": "대퇴사두근, 둔근, 햄스트링, 내전근",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-smith.png"
+                }
+            },
+            {
+                "id": 50,
+                "order": 3,
+                "targetSets": 3,
+                "targetReps": "10-15",
+                "restSeconds": 120,
+                "notes": "레그프레스",
+                "equipment": {
+                    "id": 16,
+                    "name": "레그프레스",
+                    "category": "다리",
+                    "muscleGroup": "대퇴사두근, 둔근",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-legpress.png"
+                }
+            },
+            {
+                "id": 53,
+                "order": 4,
+                "targetSets": 2,
+                "targetReps": "10",
+                "restSeconds": 270,
+                "notes": "스미스머신",
+                "equipment": {
+                    "id": 18,
+                    "name": "풀업",
+                    "category": "등",
+                    "muscleGroup": "광배근, 이두, 어깨",
+                    "imageUrl": "https://yrejfssusnltxpnqquzi.supabase.co/storage/v1/object/public/equipment/machine-pullup.png"
+                }
+            }
+        ]
+    }
+  ]
+  ```
+
 ## 추가 API 1116
 - **루틴 수정(멀티 수정)**
 - 기본 루틴

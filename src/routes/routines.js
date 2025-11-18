@@ -66,14 +66,16 @@ async function reorderExercises(tx, routineId, preferredMoves = []) {
 // GET /api/routines
 router.get('/', auth(), asyncRoute(async (req, res) => {
   const { isActive } = req.query;
-  const where = { userId: req.user.id, ...(isActive !== undefined && { isActive: isActive === 'true' }) };
+  const where = { userId: req.user.id, ...(isActive !== undefined && {
+    isActive: isActive === 'true' }) };
 
   const routines = await prisma.workoutRoutine.findMany({
     where,
     include: {
       exercises: {
         include: {
-          equipment: { select: { id: true, name: true, category: true, muscleGroup: true, imageUrl: true } }
+          equipment: { select: { id: true, name: true, category: true,
+            muscleGroup: true, imageUrl: true } }
         },
         orderBy: { order: 'asc' },
       },
@@ -82,23 +84,33 @@ router.get('/', auth(), asyncRoute(async (req, res) => {
     orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }],
   });
 
-  res.json(routines.map((r) => ({
-    id: r.id,
-    name: r.name,
-    isActive: r.isActive,
-    exerciseCount: r._count.exercises,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-    exercises: r.exercises.map((ex) => ({
-      id: ex.id,
-      order: ex.order,
-      targetSets: ex.targetSets,
-      targetReps: ex.targetReps,
-      restSeconds: ex.restSeconds, // 이미 초 단위
-      notes: ex.notes,
-      equipment: ex.equipment
-    })),
-  })));
+  res.json(routines.map((r) => {
+    // 🆕 예상 소요시간 계산
+    const estimatedMinutes = r.exercises.reduce((total, ex) => {
+      const setTime = ex.targetSets * 3; // 세트당 3분 (평균)
+      const restTime = Math.floor((ex.targetSets - 1) * ex.restSeconds / 60); // 휴식시간 (초→분)
+      return total + setTime + restTime;
+    }, 0);
+
+    return {
+      id: r.id,
+      name: r.name,
+      isActive: r.isActive,
+      exerciseCount: r._count.exercises,
+      estimatedMinutes: estimatedMinutes, // 🆕 예상 시간 (분)
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+      exercises: r.exercises.map((ex) => ({
+        id: ex.id,
+        order: ex.order,
+        targetSets: ex.targetSets,
+        targetReps: ex.targetReps,
+        restSeconds: ex.restSeconds,
+        notes: ex.notes,
+        equipment: ex.equipment
+      })),
+    };
+  }));
 }));
 
 // GET /api/routines/:id
