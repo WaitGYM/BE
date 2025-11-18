@@ -1,5 +1,4 @@
 // src/routes/notifications.js
-
 const router = require('express').Router();
 const { auth } = require('../middleware/auth');
 const asyncRoute = require('../utils/asyncRoute');
@@ -23,33 +22,31 @@ router.get('/', auth(), asyncRoute(async (req, res) => {
     days = 30,
     equipmentId,
   } = req.query;
-  
+
   const options = {
     limit: Math.min(parseInt(limit, 10), 100), // 최대 100개
     offset: parseInt(offset, 10) || 0,
     days: Math.min(parseInt(days, 10), 30), // 최대 30일
   };
-  
+
   if (isRead !== undefined) {
     options.isRead = isRead === 'true';
   }
-  
   if (category) {
     options.category = category;
   }
-  
   if (equipmentId) {
     options.equipmentId = parseInt(equipmentId, 10);
   }
-  
+
   const result = await getNotifications(req.user.id, options);
-  
-  // 날짜별로 그룹화
+
+  // 🔥 날짜별로 그룹화 - 최신순 유지
   const grouped = groupByDate(result.notifications);
-  
+
   res.json({
-    notifications: result.notifications,
-    grouped, // 날짜별 그룹
+    notifications: result.notifications, // 이미 최신순으로 정렬됨
+    grouped, // 날짜별 그룹 (최신순)
     totalCount: result.totalCount,
     unreadCount: result.unreadCount,
     hasMore: result.hasMore,
@@ -79,13 +76,13 @@ router.patch('/:id/read', auth(), asyncRoute(async (req, res) => {
   if (!notificationId) {
     return res.status(400).json({ error: '유효한 알림 ID가 필요합니다' });
   }
-  
+
   const count = await markAsRead(req.user.id, notificationId);
-  
+
   if (count === 0) {
     return res.status(404).json({ error: '알림을 찾을 수 없습니다' });
   }
-  
+
   res.json({ message: '알림을 읽음 처리했습니다', count });
 }));
 
@@ -99,15 +96,14 @@ router.patch('/read', auth(), asyncRoute(async (req, res) => {
   if (!Array.isArray(notificationIds) || notificationIds.length === 0) {
     return res.status(400).json({ error: '알림 ID 배열이 필요합니다' });
   }
-  
+
   const ids = notificationIds.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
   
   if (ids.length === 0) {
     return res.status(400).json({ error: '유효한 알림 ID가 없습니다' });
   }
-  
+
   const count = await markAsRead(req.user.id, ids);
-  
   res.json({ message: `${count}개의 알림을 읽음 처리했습니다`, count });
 }));
 
@@ -121,9 +117,8 @@ router.patch('/read-all', auth(), asyncRoute(async (req, res) => {
   const options = {};
   if (category) options.category = category;
   if (equipmentId) options.equipmentId = parseInt(equipmentId, 10);
-  
+
   const count = await markAllAsRead(req.user.id, options);
-  
   res.json({ message: `${count}개의 알림을 읽음 처리했습니다`, count });
 }));
 
@@ -132,16 +127,16 @@ router.patch('/read-all', auth(), asyncRoute(async (req, res) => {
  * 읽지 않은 알림 개수
  */
 router.get('/unread-count', auth(), asyncRoute(async (req, res) => {
-  const result = await getNotifications(req.user.id, { 
-    limit: 1, 
-    isRead: false 
+  const result = await getNotifications(req.user.id, {
+    limit: 1,
+    isRead: false
   });
   
   res.json({ unreadCount: result.unreadCount });
 }));
 
 /**
- * 날짜별 그룹화 헬퍼 함수
+ * 날짜별 그룹화 헬퍼 함수 - 최신순 유지
  */
 function groupByDate(notifications) {
   const groups = {
@@ -150,14 +145,15 @@ function groupByDate(notifications) {
     thisWeek: [],
     older: [],
   };
-  
+
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
   const thisWeek = new Date(today);
   thisWeek.setDate(thisWeek.getDate() - 7);
-  
+
+  // 🔥 이미 최신순으로 정렬된 notifications를 순서대로 처리
   notifications.forEach(notification => {
     const createdAt = new Date(notification.createdAt);
     
@@ -171,7 +167,7 @@ function groupByDate(notifications) {
       groups.older.push(notification);
     }
   });
-  
+
   return {
     today: { label: '오늘', count: groups.today.length, items: groups.today },
     yesterday: { label: '어제', count: groups.yesterday.length, items: groups.yesterday },
