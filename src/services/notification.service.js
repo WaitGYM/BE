@@ -106,7 +106,6 @@ async function getNotifications(userId, options = {}) {
       where,
       orderBy: [
         { isRead: 'asc' },        // 안읽은 것 먼저
-        { priority: 'desc' },     // 우선순위 높은 것 먼저
         { createdAt: 'desc' },    // 최신순
       ],
       take: limit,
