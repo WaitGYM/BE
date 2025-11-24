@@ -18,7 +18,7 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
   let myQueues = [];
   let myCurrentUsage = null;
   let myCompletedToday = new Map();
-  let recentCompletions = new Map(); // 🆕 최근 완료 정보
+  let recentCompletions = new Map();
 
   if (userId) {
     [myQueues, myCurrentUsage] = await Promise.all([
@@ -30,12 +30,12 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
 
     const { rangeTodayKST } = require('../utils/time');
     const { start, end } = rangeTodayKST();
+
     const completed = await prisma.equipmentUsage.findMany({
       where: {
         userId,
         equipmentId: { in: equipmentIds },
         status: 'COMPLETED',
-        // ❌ setStatus: 'COMPLETED', 조건 제거 (이 줄 삭제)
         endedAt: { gte: start, lte: end },
       },
       orderBy: { endedAt: 'desc' },
@@ -56,13 +56,13 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
       }
     });
 
-    // 🆕 최근 10분 이내 완료된 운동 조회 (다른 사용자들도 포함)
+    // 최근 10분 이내 완료된 운동 조회 (다른 사용자들도 포함)
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
     const recentCompletedUsages = await prisma.equipmentUsage.findMany({
-      where: { 
-        equipmentId: { in: equipmentIds }, 
-        status: 'COMPLETED', 
-        endedAt: { gte: tenMinutesAgo } 
+      where: {
+        equipmentId: { in: equipmentIds },
+        status: 'COMPLETED',
+        endedAt: { gte: tenMinutesAgo }
       },
       include: { user: { select: { name: true } } },
       orderBy: { endedAt: 'desc' },
@@ -88,31 +88,30 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
   }
 
   const statusMap = new Map();
+
   equipmentIds.forEach((id) => {
     const cu = currentUsages.find((u) => u.equipmentId === id);
     const queue = waitingQueues.filter((q) => q.equipmentId === id);
     const queueCount = queue.length;
     const myQ = myQueues.find((q) => q.equipmentId === id);
-    const isAvailable = !cu;
+
+    // 🔥 수정: 대기열이 있으면 사용 불가
+    const isAvailable = !cu && queueCount === 0;
+    
     const canStart = isAvailable && !myQ && (!myCurrentUsage || myCurrentUsage.equipmentId === id);
     const canQueue = !isAvailable && !myQ && (!myCurrentUsage || myCurrentUsage.equipmentId !== id);
+
     const myCompleted = userId ? myCompletedToday.get(id) || null : null;
     const recentCompletion = userId ? recentCompletions.get(id) || null : null;
 
-    // 🔧 추가: 기존 함수들을 활용한 ETA 계산
     let currentUserETA = 0;
     let queueETAs = [];
     let myEstimatedWaitMinutes = null;
-    
+
     if (cu) {
-      // 기존 calculateRealTimeETA 함수 사용
       currentUserETA = calculateRealTimeETA(cu);
-      
       if (queue.length > 0) {
-        // 기존 buildQueueETAs 함수 사용
         queueETAs = buildQueueETAs(currentUserETA, queue);
-        
-        // 내가 대기 중이라면 내 예상 대기시간 설정
         if (myQ) {
           const myIndex = queue.findIndex(q => q.id === myQ.id);
           if (myIndex !== -1) {
@@ -121,7 +120,7 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
         }
       }
     } else if (queue.length > 0) {
-      // 기구는 비어있지만 대기열이 있는 경우
+      // 🔥 수정: 기구는 비었지만 대기열이 있는 경우도 ETA 계산
       queueETAs = buildQueueETAs(0, queue);
       if (myQ && queue.length > 0) {
         const myIndex = queue.findIndex(q => q.id === myQ.id);
@@ -130,8 +129,8 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
         }
       }
     }
-    
-    // ✅ 관찰자(내 대기 없음)도 "지금 줄서면" 기준 ETA 제공
+
+    // 🔥 수정: 관찰자(대기 안한 사람)도 "지금 줄서면" 예상시간 제공
     if (myEstimatedWaitMinutes == null) {
       myEstimatedWaitMinutes = estimateIfJoinNow({
         isAvailable,
@@ -140,9 +139,9 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
         currentETA: currentUserETA,
       });
     }
-  
-    // 🆕 기구 상태 결정 로직
-    let equipmentStatus = 'available'; // available | in_use | recently_completed
+
+    // 🔥 수정: 기구 상태 결정 로직
+    let equipmentStatus = 'available';
     let statusMessage = '사용 가능';
     let statusColor = 'green';
 
@@ -150,6 +149,11 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
       equipmentStatus = 'in_use';
       statusMessage = `${cu.user.name} 사용 중`;
       statusColor = 'orange';
+    } else if (queueCount > 0) {
+      // 🔥 추가: 기구는 비었지만 대기열이 있는 경우
+      equipmentStatus = 'waiting';
+      statusMessage = `${queueCount}명 대기 중`;
+      statusColor = 'yellow';
     } else if (recentCompletion) {
       equipmentStatus = 'recently_completed';
       const minutesAgo = Math.round((Date.now() - recentCompletion.completedAt.getTime()) / 60000);
@@ -165,52 +169,49 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
     statusMap.set(id, {
       // 기본 상태 정보
       isAvailable,
-      equipmentStatus, // 🆕 추가
-      statusMessage,   // 🆕 추가
-      statusColor,     // 🆕 추가
+      equipmentStatus,
+      statusMessage,
+      statusColor,
       
       // 현재 사용자 정보
       currentUser: cu ? cu.user.name : null,
       currentUserStartedAt: cu ? cu.startedAt : null,
-      currentUsageInfo: cu
-        ? {
-            totalSets: cu.totalSets,
-            currentSet: cu.currentSet,
-            setStatus: cu.setStatus,
-            restSeconds: cu.restSeconds,
-            progress: cu.totalSets > 0 ? Math.round((cu.currentSet / cu.totalSets) * 100) : 0,
-            estimatedEndAt: cu.estimatedEndAt,
-          }
-        : null,
-
+      currentUsageInfo: cu ? {
+        totalSets: cu.totalSets,
+        currentSet: cu.currentSet,
+        setStatus: cu.setStatus,
+        restSeconds: cu.restSeconds,
+        progress: cu.totalSets > 0 ? Math.round((cu.currentSet / cu.totalSets) * 100) : 0,
+        estimatedEndAt: cu.estimatedEndAt,
+      } : null,
+      
       // 대기열 정보
       waitingCount: queueCount,
       myQueuePosition: myQ ? myQ.queuePosition : null,
       myQueueStatus: myQ ? myQ.status : null,
-      myQueueId: myQ ? myQ.id : null,  // 🔧 추가: 내 대기열 ID
+      myQueueId: myQ ? myQ.id : null,
       canStart: !!userId && canStart,
       canQueue: !!userId && canQueue,
-
-      // 🆕 추가할 필드들
+      
       isUsingOtherEquipment: !!myCurrentUsage && myCurrentUsage.equipmentId !== id,
       currentlyUsedEquipmentId: myCurrentUsage?.equipmentId || null,
-
-      // 🔧 추가: ETA 정보 (핵심!)
-      currentUserETA,           // 현재 사용자 남은 시간 (분)
-      estimatedWaitMinutes: myEstimatedWaitMinutes, // 내 예상 대기시간 (분)
-      queueETAs,               // 대기열 전체의 ETA 배열
-      averageWaitTime: queueETAs.length > 0 ? Math.round(queueETAs.reduce((a, b) => a + b, 0) / queueETAs.length) : 0,
-
-
-      // 내 완료 기록 (오늘)
+      
+      // ETA 정보
+      currentUserETA,
+      estimatedWaitMinutes: myEstimatedWaitMinutes,
+      queueETAs,
+      averageWaitTime: queueETAs.length > 0 ? 
+        Math.round(queueETAs.reduce((a, b) => a + b, 0) / queueETAs.length) : 0,
+      
+      // 내 완료 기록
       completedToday: !!myCompleted,
       lastCompletedAt: myCompleted?.lastCompletedAt ?? null,
       lastCompletedSets: myCompleted?.completedSets ?? null,
       lastCompletedTotalSets: myCompleted?.totalSets ?? null,
       lastCompletedDurationSeconds: myCompleted?.durationSeconds ?? null,
       wasFullyCompleted: myCompleted?.setStatus === 'COMPLETED',
-
-      // 🆕 최근 완료 정보 (10분 이내, 모든 사용자)
+      
+      // 최근 완료 정보
       recentCompletion: recentCompletion ? {
         userName: recentCompletion.userName,
         isMe: recentCompletion.isMe,
@@ -221,9 +222,8 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
         durationSeconds: recentCompletion.durationSeconds,
         wasFullyCompleted: recentCompletion.wasFullyCompleted,
         wasInterrupted: recentCompletion.wasInterrupted,
-        completionRate: recentCompletion.totalSets > 0 
-          ? Math.round((recentCompletion.completedSets / recentCompletion.totalSets) * 100) 
-          : 0,
+        completionRate: recentCompletion.totalSets > 0 ? 
+          Math.round((recentCompletion.completedSets / recentCompletion.totalSets) * 100) : 0,
       } : null,
     });
   });
