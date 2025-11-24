@@ -103,8 +103,6 @@ model WaitingQueue {
 
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
-
-  @@unique([equipmentId, userId, status], name: "unique_active_queue") // 같은 기구에 중복 대기 방지
   @@index([equipmentId, queuePosition])
   @@index([equipmentId, status])
 }
