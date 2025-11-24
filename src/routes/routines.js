@@ -5,6 +5,31 @@ const { createRoutineSchema, updateRoutineSchema, addExerciseSchema } = require(
 const asyncRoute = require('../utils/asyncRoute');
 
 const prisma = require('../lib/prisma');
+const { rangeTodayKST } = require('../utils/time');
+
+/**
+ * 어제 이전에 활성화된 루틴들을 자동으로 비활성화
+ */
+async function deactivateOldRoutines(userId, tx = prisma) {
+  const { start } = rangeTodayKST(); // 오늘 00:00 KST
+  
+  const deactivated = await tx.workoutRoutine.updateMany({
+    where: {
+      userId,
+      isActive: true,
+      updatedAt: { lt: start } // 오늘 이전에 업데이트된 것들
+    },
+    data: {
+      isActive: false
+    }
+  });
+  
+  if (deactivated.count > 0) {
+    console.log(`User ${userId}: ${deactivated.count}개의 오래된 루틴 자동 비활성화`);
+  }
+  
+  return deactivated.count;
+}
 
 /**
  * order 재정렬 헬퍼 함수
@@ -66,6 +91,7 @@ async function reorderExercises(tx, routineId, preferredMoves = []) {
 // GET /api/routines
 router.get('/', auth(), asyncRoute(async (req, res) => {
   const { isActive } = req.query;
+  await deactivateOldRoutines(req.user.id);
   const where = { userId: req.user.id, ...(isActive !== undefined && {
     isActive: isActive === 'true' }) };
 
@@ -116,6 +142,7 @@ router.get('/', auth(), asyncRoute(async (req, res) => {
 // GET /api/routines/:id
 router.get('/:id', auth(), asyncRoute(async (req, res) => {
   const routineId = parseInt(req.params.id, 10);
+  await deactivateOldRoutines(req.user.id);
   const routine = await prisma.workoutRoutine.findFirst({
     where: { id: routineId, userId: req.user.id },
     include: { exercises: { include: { equipment: true }, orderBy: { order: 'asc' } } },
@@ -639,6 +666,7 @@ router.post('/:routineId/exercises/:exerciseId/start', auth(), asyncRoute(async 
   const totalDurationSeconds = workTimeSeconds + restTimeSeconds;
 
   const usage = await prisma.$transaction(async (tx) => {
+    await deactivateOldRoutines(req.user.id, tx);
     // 1) 내 모든 루틴 비활성화
     await tx.workoutRoutine.updateMany({
       where: { userId: req.user.id, isActive: true },
@@ -742,6 +770,7 @@ router.put('/active-usage/rest-time', auth(), asyncRoute(async (req, res) => {
 
 // 🆕 GET /api/routines/active-usage/status - 현재 사용중인 기구 상태
 router.get('/active-usage/status', auth(), asyncRoute(async (req, res) => {
+  await deactivateOldRoutines(req.user.id);
   const usage = await prisma.equipmentUsage.findFirst({
     where: { userId: req.user.id, status: 'IN_USE' },
     include: { equipment: true }
@@ -868,6 +897,7 @@ router.post('/:routineId/start/:equipmentId', auth(), asyncRoute(async (req, res
 
   // 7. 트랜잭션으로 루틴 활성화 + 운동 시작
   const usage = await prisma.$transaction(async (tx) => {
+    await deactivateOldRoutines(req.user.id, tx);
     // 내 모든 루틴 비활성화
     await tx.workoutRoutine.updateMany({
       where: { userId: req.user.id, isActive: true },
@@ -1004,6 +1034,7 @@ router.post('/:routineId/start-first', auth(), asyncRoute(async (req, res) => {
   const totalDurationSeconds = workTimeSeconds + restTimeSeconds;
 
   const usage = await prisma.$transaction(async (tx) => {
+    await deactivateOldRoutines(req.user.id, tx);
     // 1) 내 모든 루틴 비활성화
     await tx.workoutRoutine.updateMany({
       where: { userId: req.user.id, isActive: true },
@@ -1057,6 +1088,7 @@ router.post('/:routineId/start-first', auth(), asyncRoute(async (req, res) => {
 router.post('/:routineId/next', auth(), asyncRoute(async (req, res) => {
   const routineId = parseInt(req.params.routineId, 10);
   const { totalSets, restSeconds } = req.body;
+  await deactivateOldRoutines(req.user.id);
 
   // 루틴 조회
   const routine = await prisma.workoutRoutine.findFirst({
