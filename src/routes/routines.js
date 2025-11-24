@@ -693,12 +693,37 @@ router.put('/active-usage/rest-time', auth(), asyncRoute(async (req, res) => {
     return res.status(404).json({ error: '현재 사용 중인 기구가 없습니다' });
   }
 
-  // 휴식 중이거나 다음 휴식을 위한 설정 변경
+  // 새로운 휴식시간 계산
   const newRestSeconds = Math.max(0, usage.restSeconds + adjustment);
   
+  // 🔥 예상 종료 시간 재계산
+  const now = new Date();
+  const remainingSets = Math.max(0, usage.totalSets - usage.currentSet + 1);
+  
+  // 현재 세트의 남은 시간 계산
+  let currentSetRemaining = 0;
+  if (usage.setStatus === 'EXERCISING' && usage.currentSetStartedAt) {
+    const setElapsed = Math.floor((now - usage.currentSetStartedAt) / 1000);
+    currentSetRemaining = Math.max(0, (5 * 60) - setElapsed); // 세트당 5분 가정
+  } else if (usage.setStatus === 'RESTING' && usage.restStartedAt) {
+    const restElapsed = Math.floor((now - usage.restStartedAt) / 1000);
+    currentSetRemaining = Math.max(0, newRestSeconds - restElapsed); // 변경된 휴식시간 적용
+  }
+  
+  // 남은 전체 시간 계산
+  const futureWorkTime = Math.max(0, remainingSets - 1) * 5 * 60; // 남은 세트들의 운동 시간
+  const futureRestTime = Math.max(0, remainingSets - 1) * newRestSeconds; // 남은 세트들의 휴식 시간 (변경된 값 적용)
+  const totalRemainingSeconds = currentSetRemaining + futureWorkTime + futureRestTime;
+  
+  const newEstimatedEndAt = new Date(now.getTime() + totalRemainingSeconds * 1000);
+
+  // 업데이트
   const updated = await prisma.equipmentUsage.update({
     where: { id: usage.id },
-    data: { restSeconds: newRestSeconds }
+    data: { 
+      restSeconds: newRestSeconds,
+      estimatedEndAt: newEstimatedEndAt // 🔥 예상 종료 시간도 함께 업데이트
+    }
   });
 
   res.json({
@@ -709,7 +734,9 @@ router.put('/active-usage/rest-time', auth(), asyncRoute(async (req, res) => {
     adjustment: adjustment,
     currentSet: updated.currentSet,
     totalSets: updated.totalSets,
-    setStatus: updated.setStatus
+    setStatus: updated.setStatus,
+    estimatedEndAt: updated.estimatedEndAt, // 🆕 변경된 예상 종료 시간 포함
+    remainingMinutes: Math.ceil(totalRemainingSeconds / 60) // 🆕 남은 예상 시간(분)
   });
 }));
 
