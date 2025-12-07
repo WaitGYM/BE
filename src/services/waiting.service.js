@@ -7,7 +7,6 @@ const { saveNotification } = require('./notification.service');
 
 // 스팸 방지를 위한 메모리 캐시: 장비별 최근 전송 상태
 const lastWaitNotice = new Map(); // key: equipmentId, value: { count, ts }
-
 const AVG_SET_MIN = 3; // 세트 평균(분)
 const SETUP_CLEANUP_MIN = 1; // 세팅/정리(분)
 
@@ -78,10 +77,10 @@ function computeStopSummary(usage, now = new Date()) {
   if (usage.setStatus === 'EXERCISING' && usage.currentSetStartedAt) {
     inFlightWorkSec = Math.max(0, Math.floor((now - new Date(usage.currentSetStartedAt)) / 1000));
   }
-  
+
   const workTimeSec = accWork + inFlightWorkSec;
   const restTimeSec = Math.max(0, totalDurationSec - workTimeSec);
-  
+
   return {
     workTimeSec,
     restTimeSec,
@@ -118,7 +117,7 @@ async function startAutoUpdate(equipmentId) {
       const currentETA = calculateRealTimeETA(currentUsage);
       const queueETAs = buildQueueETAs(currentETA, queue);
       
-      // 이벤트 발행 (WebSocket 의존성 제거)
+      // 이벤트 발행 (WebSocket 전용)
       eventBus.emitETAUpdate(equipmentId, {
         equipmentId,
         equipmentName: currentUsage.equipment.name,
@@ -140,18 +139,7 @@ async function startAutoUpdate(equipmentId) {
         isAutoUpdate: true,
       });
       
-      // 각 대기자에게 알림 저장 + 이벤트 발행
-      queue.forEach((q, i) => {
-        sendAndSaveNotification(q.userId, {
-          type: 'AUTO_ETA_UPDATE',
-          title: 'ETA 자동 업데이트',
-          message: `${currentUsage.equipment.name} 예상 대기시간: ${queueETAs[i]}분`,
-          equipmentId,
-          equipmentName: currentUsage.equipment.name,
-          estimatedWaitMinutes: queueETAs[i],
-          queuePosition: q.queuePosition,
-        });
-      });
+      // ❌ 알림 저장/전송 제거 - 자동 업데이트는 WebSocket만
     } catch (e) {
       console.error('자동 ETA 업데이트 오류:', e);
       stopAutoUpdate(equipmentId);
@@ -206,7 +194,7 @@ async function notifyNextUser(equipmentId) {
     data: { status: 'NOTIFIED', notifiedAt: new Date() }
   });
   
-  // 알림 메시지에 현재 상황 반영
+  // ✅ EQUIPMENT_AVAILABLE 알림만 저장/전송
   let notificationMessage = `예약한 ${next.equipment.name} 자리가 비었어요`;
   let additionalInfo = {};
   
@@ -241,7 +229,7 @@ async function notifyNextUser(equipmentId) {
     ...additionalInfo
   });
   
-  // 상태 변경 이벤트 발행
+  // 상태 변경 이벤트 발행 (WebSocket 전용)
   eventBus.emitEquipmentStatusChange(equipmentId, {
     type: 'next_user_notified',
     equipmentName: next.equipment.name,
@@ -257,6 +245,7 @@ async function notifyNextUser(equipmentId) {
         data: { status: 'EXPIRED' }
       });
       
+      // ✅ QUEUE_EXPIRED 알림 저장/전송
       await sendAndSaveNotification(next.userId, {
         type: 'QUEUE_EXPIRED',
         title: '대기 만료',
@@ -298,12 +287,14 @@ async function notifyCurrentUserWaitingCount(equipmentId, opts = {}) {
   
   const now = Date.now();
   const prev = lastWaitNotice.get(equipmentId);
+  
   if (prev && prev.count === waitingCount && (now - prev.ts) < cooldownMs) {
     return false;
   }
   
   lastWaitNotice.set(equipmentId, { count: waitingCount, ts: now });
   
+  // ✅ WAITING_COUNT 알림 저장/전송
   await sendAndSaveNotification(usage.userId, {
     type: 'WAITING_COUNT',
     title: '대기자 알림',
@@ -325,16 +316,10 @@ async function sendAndSaveNotification(userId, payload) {
 }
 
 // ===== 🆕 사용자 운동 조회 헬퍼 =====
-
-/**
- * 사용자의 현재 활성 운동 조회
- * @param {number} userId - 사용자 ID
- * @returns {Promise<Object|null>} 현재 사용중인 EquipmentUsage 또는 null
- */
 async function getCurrentUsage(userId) {
   return await prisma.equipmentUsage.findFirst({
     where: { userId, status: 'IN_USE' },
-    include: { 
+    include: {
       equipment: {
         select: {
           id: true,
@@ -343,26 +328,20 @@ async function getCurrentUsage(userId) {
           imageUrl: true,
           muscleGroup: true
         }
-      }, 
-      user: { select: { id: true, name: true } } 
+      },
+      user: { select: { id: true, name: true } }
     }
   });
 }
 
-/**
- * equipmentId로 특정 기구 사용 조회
- * @param {number} userId - 사용자 ID
- * @param {number} equipmentId - 기구 ID
- * @returns {Promise<Object|null>} 해당 기구의 EquipmentUsage 또는 null
- */
 async function getUsageByEquipment(userId, equipmentId) {
   return await prisma.equipmentUsage.findFirst({
-    where: { 
-      equipmentId, 
-      userId, 
-      status: 'IN_USE' 
+    where: {
+      equipmentId,
+      userId,
+      status: 'IN_USE'
     },
-    include: { 
+    include: {
       equipment: {
         select: {
           id: true,
@@ -371,8 +350,8 @@ async function getUsageByEquipment(userId, equipmentId) {
           imageUrl: true,
           muscleGroup: true
         }
-      }, 
-      user: { select: { id: true, name: true } } 
+      },
+      user: { select: { id: true, name: true } }
     }
   });
 }
@@ -394,7 +373,6 @@ module.exports = {
   computeStopSummary,
   notifyCurrentUserWaitingCount,
   sendAndSaveNotification,
-  // 🆕 추가
   getCurrentUsage,
   getUsageByEquipment,
 };
