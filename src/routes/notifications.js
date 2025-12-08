@@ -8,7 +8,7 @@ const {
   markAllAsRead,
   getNotificationStats,
 } = require('../services/notification.service');
-
+const prisma = require('../lib/prisma');
 /**
  * GET /api/notifications
  * 알림 목록 조회
@@ -126,14 +126,28 @@ router.patch('/read-all', auth(), asyncRoute(async (req, res) => {
  * GET /api/notifications/unread-count
  * 읽지 않은 알림 개수
  */
-router.get('/unread-count', auth(), asyncRoute(async (req, res) => {
-  const result = await getNotifications(req.user.id, {
-    limit: 1,
-    isRead: false
-  });
-  
-  res.json({ unreadCount: result.unreadCount });
-}));
+router.get(
+  '/unread-count',
+  auth(),
+  asyncRoute(async (req, res) => {
+    const userId = req.user.id;
+
+    // ✅ getNotifications와 동일하게 최근 30일 기준
+    const days = 30;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const unreadCount = await prisma.notification.count({
+      where: {
+        userId,
+        isRead: false,
+        createdAt: { gte: startDate },   // 🔹 요 조건이 핵심
+      },
+    });
+
+    res.json({ unreadCount });
+  })
+);
 
 /**
  * 날짜별 그룹화 헬퍼 함수 - 최신순 유지
