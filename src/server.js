@@ -142,7 +142,7 @@ server.listen(PORT, () => {
   console.log(`✅ 이벤트 버스 패턴 적용 완료 - 순환 참조 해결됨`);
   
   // 알림 자동 정리 작업 시작
-  scheduleNotificationCleanup();
+  //scheduleNotificationCleanup();
 });
 
 /** ===================== 알림 자동 정리 스케줄러 ===================== */
