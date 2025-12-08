@@ -24,7 +24,7 @@ const routineRoutes = require('./routes/routines');
 const notificationRoutes = require('./routes/notifications');
 
 // 알림 정리 서비스
-const { cleanupOldNotifications } = require('./services/notification.service');
+//const { cleanupOldNotifications } = require('./services/notification.service');
 
 const app = express();
 const server = http.createServer(app);
