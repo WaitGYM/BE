@@ -173,18 +173,21 @@ async function markAllAsRead(userId, options = {}) {
  * 알림 삭제 (30일 이상 된 읽은 알림 자동 삭제)
  */
 async function cleanupOldNotifications() {
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  // TODO: 나중에 Prisma 로직 안정화되면 다시 구현
+  console.log('[Notification Cleanup] 비활성화 상태 - 아무 작업도 하지 않음');
+  return 0;
+  // const thirtyDaysAgo = new Date();
+  // thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-  const result = await prisma.notification.deleteMany({
-    where: {
-      isRead: true,
-      createdAt: { lt: thirtyDaysAgo },
-    },
-  });
+  // const result = await prisma.notification.deleteMany({
+  //   where: {
+  //     isRead: true,
+  //     createdAt: { lt: thirtyDaysAgo },
+  //   },
+  // });
 
-  console.log(`${result.count}개의 오래된 알림 삭제됨`);
-  return result.count;
+  // console.log(`${result.count}개의 오래된 알림 삭제됨`);
+  // return result.count;
 }
 
 /**
