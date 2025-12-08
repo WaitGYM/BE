@@ -219,6 +219,21 @@ async function sendAndSaveNotification(userId, payload) {
   return true;
 }
 
+async function getUnreadNotificationCount(userId) {
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const count = await prisma.notification.count({
+    where: {
+      userId,
+      isRead: false,                    // ✅ 읽지 않은 것만
+      createdAt: { gte: thirtyDaysAgo } // ✅ 목록과 동일한 기간 필터
+    },
+  });
+
+  return count;
+}
+
 module.exports = {
   saveNotification,
   sendAndSaveNotification,
@@ -227,6 +242,7 @@ module.exports = {
   markAllAsRead,
   cleanupOldNotifications,
   getNotificationStats,
+  getUnreadNotificationCount,
   NOTIFICATION_CATEGORIES,
   NOTIFICATION_PRIORITY,
 };

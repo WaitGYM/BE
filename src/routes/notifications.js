@@ -7,6 +7,7 @@ const {
   markAsRead,
   markAllAsRead,
   getNotificationStats,
+  getUnreadNotificationCount,
 } = require('../services/notification.service');
 const prisma = require('../lib/prisma');
 /**
@@ -126,28 +127,31 @@ router.patch('/read-all', auth(), asyncRoute(async (req, res) => {
  * GET /api/notifications/unread-count
  * 읽지 않은 알림 개수
  */
-router.get(
-  '/unread-count',
-  auth(),
-  asyncRoute(async (req, res) => {
+router.get('/unread-count', auth(), async (req, res) => {
+  console.log('[unread-count] user =', req.user);
+
+  try {
+    if (!req.user || !req.user.id) {
+      console.error('[unread-count] req.user 없음');
+      return res.status(401).json({ error: 'UNAUTHORIZED' });
+    }
+
     const userId = req.user.id;
+    const count = await getUnreadNotificationCount(userId);
 
-    // ✅ getNotifications와 동일하게 최근 30일 기준
-    const days = 30;
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
+    console.log('[unread-count] 성공, count =', count);
+    return res.json({ unreadCount: count });
+  } catch (err) {
+    console.error('[unread-count] 에러:', err);
 
-    const unreadCount = await prisma.notification.count({
-      where: {
-        userId,
-        isRead: false,
-        createdAt: { gte: startDate },   // 🔹 요 조건이 핵심
-      },
+    return res.status(500).json({
+      error: 'INTERNAL_SERVER_ERROR',
+      message: err.message,      // ✅ Postman 에서 바로 볼 수 있는 부분
+      // stack: err.stack,       // 필요하면 일시적으로 여기도 넣어두기
     });
+  }
+});
 
-    res.json({ unreadCount });
-  })
-);
 
 /**
  * 날짜별 그룹화 헬퍼 함수 - 최신순 유지
