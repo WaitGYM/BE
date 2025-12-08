@@ -220,22 +220,30 @@ async function sendAndSaveNotification(userId, payload) {
 }
 
 async function getUnreadNotificationCount(userId) {
-  if (!userId) {
-    throw new Error('userId가 없습니다 (getUnreadNotificationCount)');
+  try {
+    if (!userId) {
+      console.error('[getUnreadNotificationCount] userId가 없습니다');
+      return 0; // 에러 대신 0 반환
+    }
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const count = await prisma.notification.count({
+      where: {
+        userId,
+        isRead: false,
+        createdAt: { gte: thirtyDaysAgo },
+      },
+    });
+
+    console.log(`[getUnreadNotificationCount] userId=${userId}, count=${count}`);
+    return count || 0; // null/undefined 방어
+    
+  } catch (error) {
+    console.error('[getUnreadNotificationCount] 에러:', error);
+    return 0; // 에러 시 0 반환 (서비스 중단 방지)
   }
-
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-  const count = await prisma.notification.count({
-    where: {
-      userId,
-      isRead: false,                 // 읽지 않은 것만
-      createdAt: { gte: thirtyDaysAgo },
-    },
-  });
-
-  return count;
 }
 
 module.exports = {

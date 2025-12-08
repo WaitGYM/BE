@@ -128,8 +128,8 @@ router.patch('/read-all', auth(), asyncRoute(async (req, res) => {
  * 읽지 않은 알림 개수
  */
 router.get('/unread-count', auth(), async (req, res) => {
-  console.log('[unread-count] user =', req.user);
-
+  console.log('[unread-count] 요청 시작, userId =', req.user?.id);
+  
   try {
     if (!req.user || !req.user.id) {
       console.error('[unread-count] req.user 없음');
@@ -138,16 +138,17 @@ router.get('/unread-count', auth(), async (req, res) => {
 
     const userId = req.user.id;
     const count = await getUnreadNotificationCount(userId);
-
+    
     console.log('[unread-count] 성공, count =', count);
     return res.json({ unreadCount: count });
+    
   } catch (err) {
     console.error('[unread-count] 에러:', err);
-
     return res.status(500).json({
       error: 'INTERNAL_SERVER_ERROR',
-      message: err.message,      // ✅ Postman 에서 바로 볼 수 있는 부분
-      // stack: err.stack,       // 필요하면 일시적으로 여기도 넣어두기
+      message: err.message,
+      // 개발 환경에서만 stack trace 포함
+      ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
     });
   }
 });
