@@ -102,13 +102,10 @@ ws.onmessage = (event) => {
 };
 ```
 
-### 알림 타입 (우선순위순)
-1. **EQUIPMENT_AVAILABLE** - 기구 사용 가능 (우선순위 10)
-2. **QUEUE_EXPIRED** - 대기 만료 (우선순위 8)
-3. **REST_STARTED** - 휴식 시작
-4. **NEXT_SET_STARTED** - 다음 세트 시작
-5. **WAITING_COUNT** - 내 뒤 대기자 수
-6. **ETA_UPDATED** - 예상 대기시간 업데이트
+### 알림 타입
+1. **EQUIPMENT_AVAILABLE** - 기구 사용 가능
+2. **QUEUE_EXPIRED** - 대기 만료 
+3. **WAITING_COUNT** - 내 뒤 대기자 수
 
 ## 📱 사용 흐름
 
