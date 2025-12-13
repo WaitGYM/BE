@@ -1,123 +1,160 @@
-# 🏋️‍♂️ 헬스장 웨이팅 시스템 (Gym Waiting System)
+# 헬스장 웨이팅 시스템 (Gym Waiting System)
 
 > **실시간 기구 대기열 관리 시스템** - 줄서기 방식으로 공정하고 효율적인 헬스장 기구 사용
 
 ## 📖 개요
+시간 예약 없이 **현장 대기열(웨이팅)** 방식으로 헬스장 기구를 관리하는 시스템입니다.
+- 줄서기 방식의 공정한 순서 관리
+- 세트별 운동 진행 실시간 추적
+- 자동으로 다음 사람에게 순서 넘김
 
-기존의 복잡한 **시간 예약 시스템**을 넘어선, 실제 헬스장 환경에 최적화된 **웨이팅(대기열) 시스템**입니다. 
-시간을 미리 정하지 않고, 현장에서 **"줄서기"** 방식으로 순서를 기다린 후, **세트별 운동 진행을 실시간 추적**하여 자동으로 다음 사람에게 넘어가는 자연스러운 플로우를 제공합니다.
+## ✨ 주요 기능
+- **Google OAuth 인증** - 간편한 소셜 로그인
+- **실시간 웨이팅 시스템** - 대기열 자동 관리
+- **세트별 운동 추적** - 운동 진행 상황 실시간 모니터링
+- **루틴 관리** - 개인 맞춤 운동 루틴 생성/관리
+- **실시간 알림** - WebSocket 기반 즉시 알림
+- **즐겨찾기** - 자주 사용하는 기구 저장
 
-## 🎯 시스템 개요
+## 🛠 기술 스택
+- **Backend**: Node.js, Express.js, WebSocket(ws)
+- **Database**: PostgreSQL + Prisma ORM
+- **Auth**: Passport.js (Google OAuth), JWT
+- **Real-time**: WebSocket 실시간 통신
 
-이 시스템은 헬스장의 기구 사용을 효율적으로 관리하기 위한 백엔드 API입니다. 주요 기능은 다음과 같습니다:
+## 🚀 핵심 API
 
-- **Google OAuth 인증**: 간편한 소셜 로그인
-- **기구 관리**: 카테고리별 헬스장 기구 조회
-- **예약 시스템**: 시간 기반 기구 예약
-- **웨이팅 시스템**: 실시간 대기열 관리 및 세트별 운동 추적
-- **즐겨찾기**: 자주 사용하는 기구 저장
-- **실시간 알림**: WebSocket을 통한 즉시 알림
+### 인증
+```http
+GET  /api/auth/google              # Google OAuth 로그인
+GET  /api/auth/google/callback     # OAuth 콜백
+GET  /api/auth/me                  # 사용자 정보
+POST /api/auth/logout              # 로그아웃
+```
 
-## Backend API 문서
-### 수정 API 1119
-- **루틴 수정(멀티 수정)**
-  - `GET /api/routines` — 루틴 목록 응답에 estimatedMinutes 필드 추가
-### 추가 API 1116
-- **루틴 수정(멀티 수정)**
-  - `PUT /api/routines/:routineId` — 전체 루틴 수정
+### 기구 관리
+```http
+GET  /api/equipment                        # 기구 목록 (카테고리/검색)
+GET  /api/equipment/:id                    # 기구 상세
+GET  /api/equipment/status?equipmentIds=   # 여러 기구 상태 조회
+POST /api/equipment/:id/quick-start        # 즉시 사용 시작
+GET  /api/equipment/my-completed           # 완료 운동 내역
+GET  /api/equipment/my-stats               # 운동 통계
+GET  /api/equipment/today-total-time       # 오늘 총 운동시간
+```
 
-### 추가 API 1113
-- **루틴에서의 대기 등록**
-  - `POST /api/routines/:routineId/queue/:equipmentId` — 루틴에서 특정 운동 대기 등록
-  - `POST /api/routines/:routineId/queue-next` — 루틴의 다음 운동 자동 대기 등록
-  - `GET /api/routines/:routineId/queue-status` — 루틴 전체 운동의 대기 상태 조회
-  
-### 추가 API 1112
-- **루틴 수정(멀티 수정)**
-  - `PATCH /api/routines/:routineId` — 여러 운동을 한 번에 수정/추가, 순서(order)를 통해 변경 가능
-  - `GET /api/equipment?include_status=true&sort_by=available` — 사용가능 우선 정렬 : status.isAvailable=true인 장비들이 위에, 같다면 waitingCount↑, 그래도 같으면 estimatedWaitMinutes↑ 순.
-  - `GET /api/equipment?include_status=true&sort_by=waiting_asc` — 대기 인원 적은 -> 많은
-  - `GET /api/equipment?include_status=true&sort_by=waiting_desc` — 대기 인원 많은 -> 적은
-   - `GET /api/equipment?include_status=true&category=다리&search=스쿼트&sort_by=available` — 검색/카테고리 필터 조합
+### 웨이팅 시스템
+```http
+POST   /api/waiting/queue/:equipmentId        # 대기열 등록
+DELETE /api/waiting/queue/:queueId            # 대기 취소
+POST   /api/waiting/start-using/:equipmentId  # 운동 시작
+POST   /api/waiting/complete-set              # 세트 완료
+POST   /api/waiting/skip-rest                 # 휴식 건너뛰기
+POST   /api/waiting/stop-exercise             # 운동 중단
+GET    /api/waiting/status/:equipmentId       # 실시간 상태
+GET    /api/waiting/current-usage             # 현재 사용중인 기구
+```
 
-### 추가API 1108
-- **루틴 수정(부분 변경) 전용 엔드포인트**
-  - `PATCH /api/routines/:routineId/name` — 루틴 이름만 변경
-  - `POST  /api/routines/:routineId/exercises/add` — 루틴에 기구 추가
-  - `DELETE /api/routines/:routineId/exercises/:equipmentId` — 루틴에서 기구 제거
-  - `PATCH /api/routines/:routineId/exercises/:equipmentId/sets` — 세트 수만 변경
-  - `PATCH /api/routines/:routineId/exercises/:equipmentId/rest` — 휴식 시간만 변경
-  - `PATCH /api/routines/:routineId/exercises/:equipmentId/order` — 순서만 변경
-- **루틴 운동 시작**
-  - `POST /api/routines/:routineId/start-first` — 첫 운동 자동 시작
-  - `POST /api/routines/:routineId/start/:equipmentId` — 특정 기구부터 시작
-  - `POST /api/routines/:routineId/next` - 루틴 상 다음 운동 시작
-- **운동 진행 관리(사용자 기반, equipmentId 불필요)**
-  - `POST /api/waiting/complete-set` — 현재 사용 중인 기구의 세트 완료
-  - `POST /api/waiting/skip-rest` — 현재 사용 중인 기구의 휴식 스킵
-  - `POST /api/waiting/stop-exercise` — 현재 운동 중단
- 
-### 추가API 1104
-- 🆕 `GET /api/equipment/today-total-time` - 오늘 하루 총 운동시간 및 상세 분석
+### 루틴 관리
+```http
+GET    /api/routines                                    # 루틴 목록
+POST   /api/routines                                    # 루틴 생성
+GET    /api/routines/:id                                # 루틴 상세
+PATCH  /api/routines/:id                                # 루틴 수정
+DELETE /api/routines/:id                                # 루틴 삭제
+POST   /api/routines/:routineId/start-first            # 첫 운동 시작
+POST   /api/routines/:routineId/start/:equipmentId     # 특정 운동 시작
+POST   /api/routines/:routineId/next                   # 다음 운동
+POST   /api/routines/:routineId/queue/:equipmentId     # 루틴 운동 대기 등록
+```
 
-### 알람API
-- `GET /api/notifications` - 알림목록조회
-- `GET /api/notifications/unread-count` - 읽지 않은 알림 개수
-- `PATCH /api/notifications/:id/read` - 특정 알림 읽음 처리
-- `PATCH /api/notifications/read` - 여러 특정 알림 읽음 처리
-- `PATCH /api/notifications/read-all` - 모든 알림 읽음 처리
+### 알림
+```http
+GET   /api/notifications                  # 알림 목록
+GET   /api/notifications/unread-count     # 안읽은 알림 수
+PATCH /api/notifications/:id/read         # 알림 읽음 처리
+PATCH /api/notifications/read-all         # 모든 알림 읽음
+```
 
-### 🔑 Auth API
-- `GET /api/auth/google` - Google OAuth 로그인 시작
-- `GET /api/auth/google/callback` - OAuth 콜백 처리
-- `GET /api/auth/me` - 현재 사용자 정보 조회
-- `POST /api/auth/logout` - 로그아웃
+### 즐겨찾기
+```http
+GET    /api/favorites                            # 즐겨찾기 목록
+POST   /api/favorites/:equipmentId               # 즐겨찾기 추가
+DELETE /api/favorites/equipment/:equipmentId     # 즐겨찾기 제거
+```
 
-### 📋 Equipment API  
-- `GET /api/equipment` - 기구 목록 조회 (카테고리/검색 필터 포함)
-- `GET /api/equipment/search` - 기구 검색 (검색어로 필터링, 응답 형식은 기구 목록과 동일)
-- `GET /api/equipment/categories` - 카테고리 목록
-- `GET /api/equipment/:id` - 특정 기구 상세 조회
-- `GET /api/equipment/status?equipmentIds=...` - 여러 기구들의 실시간 상태 정보 조회 (여러 기구의 사용/대기 현황 한번에 확인)
-- `GET /api/equipment/my-completed` - 내가 오늘/지정일에 완료한 운동 목록 조회 (내 사용 이력)
-- `GET /api/equipment/my-stats` - 나의 운동 통계 정보 조회 (주/월/년별 합계 및 분석)
-- 🆕 `GET /api/equipment/today-total-time` - 오늘 하루 총 운동시간 및 상세 분석
-- `POST /api/equipment/:id/quick-start` - 즉시 운동 시작 (해당 기구가 비어 있다면 바로 사용 시작)
+## 🔔 WebSocket 실시간 알림
 
-### ⭐ Favorites API
-- `GET /api/favorites` - 내 즐겨찾기 목록
-- `POST /api/favorites/:equipmentId` - 즐겨찾기 추가
-- `DELETE /api/favorites/equipment/:equipmentId` - 즐겨찾기 제거
-- `GET /api/favorites/check/:equipmentId` - 즐겨찾기 상태 확인(기구)
+### 연결 및 인증
+```javascript
+const ws = new WebSocket('ws://localhost:4000/ws');
 
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    type: 'auth',
+    token: 'your-jwt-token'
+  }));
+};
 
-### ⏰ 수정된 Waiting System API (웨이팅 시스템)
-**🏋️ 운동 관리:**
-- `POST /api/waiting/start-using/:equipmentId` - 기구 사용 시작
-- `POST /api/waiting/complete-set/:equipmentId` - 세트 완료
-- `POST /api/waiting/skip-rest/:equipmentId` - 휴식 스킵
-- `POST /api/waiting/stop-exercise/:equipmentId` - 운동 중단
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log('알림:', data);
+};
+```
 
-**📝 대기열 관리:**
-- `POST /api/waiting/queue/:equipmentId` - 대기열 등록(해당 기구에 대기 시작)
-- `DELETE /api/waiting/queue/:queueId` - 대기열 취소
-- `GET /api/waiting/status/:equipmentId` - 기구 상태 및 대기열 조회
-- `POST /api/waiting/update-eta/:equipmentId` - (수동) 예상 대기시간 업데이트 + 브로드캐스트
+### 알림 타입 (우선순위순)
+1. **EQUIPMENT_AVAILABLE** - 기구 사용 가능 (우선순위 10)
+2. **QUEUE_EXPIRED** - 대기 만료 (우선순위 8)
+3. **REST_STARTED** - 휴식 시작
+4. **NEXT_SET_STARTED** - 다음 세트 시작
+5. **WAITING_COUNT** - 내 뒤 대기자 수
+6. **ETA_UPDATED** - 예상 대기시간 업데이트
 
-**🔧 관리자 기능:**
-- `GET /api/waiting/stats` - 사용 통계 조회
+## 📱 사용 흐름
 
-**📋 운동 루틴(루틴 API는 모두 JWT 인증 필요):**
-- `GET /api/routines` - 내 운동 루틴 목록 조회(필요에 따라 활성/비활성 필터)
-- `GET /api/routines/:id` - 특정 루틴 상세 조회(포함된 운동 목록 등)
-- `POST /api/routines` - 새로운 운동 루틴 생성 (이름, 구성)
-- `PUT /api/routines/:id` - 운동 루틴 수정(이름, 구성, 활성여부 변경)
-- `DELETE /api/routines/:id` - 운동 루틴 삭제
-- `POST /api/routines/:routineId/exercises/:exerciseId/start` - 루틴의 특정 운동 즉시 시작(기구 사용시작)
-- `POST /api/routines/:routineId/exercises/:exerciseId/queue` - 루틴의 특정 운동 대기열 등록
-- `PUT /api/routines/active-usage/rest-time` - 휴식타이머 +-10초 간격 조정
-- `GET /api/routines/active-usage/status`- 현재 운동 상태 True/False
+### 기구가 비어있을 때
+```
+1. 기구 선택
+2. 운동 설정 (세트 수, 휴식 시간)
+3. "바로 시작"
+4. 세트별 진행 → 자동 완료
+```
 
+### 기구가 사용 중일 때
+```
+1. 기구 선택
+2. "대기열 등록"
+3. 대기 (실시간 순번 확인)
+4. 알림 수신 (5분 유예)
+5. "운동 시작"
+6. 세트별 진행 → 자동 완료
+```
+
+## 🔐 인증 방식
+모든 인증 필요 API는 헤더에 JWT 토큰 포함:
+```http
+Authorization: Bearer <your-jwt-token>
+```
+
+## ⚠️ 주요 에러 코드
+- `400` - 잘못된 요청
+- `401` - 인증 필요
+- `403` - 권한 없음
+- `404` - 리소스 없음
+- `409` - 충돌 (이미 사용중, 중복 대기 등)
+- `500` - 서버 오류
+
+## 💡 특징
+- ✅ 시간 예약 없는 간단한 대기열 시스템
+- ✅ 세트별 자동 진행 및 추적
+- ✅ WebSocket 실시간 알림
+- ✅ 공정한 FIFO 순서 관리
+- ✅ 자동 대기열 재배치
+- ✅ 개인 운동 루틴 관리
+
+---
+
+**Backend API Server** | Node.js + Express.js + PostgreSQL + WebSocket
 # 📋 요청 바디, 응답 바디
 ## 수정 API 1119
 - **루틴 수정(멀티 수정)**
@@ -2482,264 +2519,4 @@ ws://localhost:4000/ws
 }
 ```
 
----
-
-
-## 🔔 실시간 알림 (WebSocket)
-
-### 연결 설정
-```javascript
-const ws = new WebSocket('wss://your-backend.com/ws');
-
-ws.onopen = () => {
-  // JWT 토큰으로 인증
-  ws.send(JSON.stringify({
-    type: 'auth',
-    token: 'your-jwt-token'
-  }));
-};
-
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log('받은 알림:', data);
-};
-```
-
-### 알림 타입들
-
-#### 1. 인증 성공
-```json
-{
-  "type": "auth_success",
-  "message": "실시간 알림 연결 완료"
-}
-```
-
-#### 2. 기구 사용 가능 알림
-```json
-{
-  "type": "EQUIPMENT_AVAILABLE",
-  "title": "기구 사용 가능",
-  "message": "바벨 벤치 프레스을 사용할 차례입니다. 5분 내 시작해주세요",
-  "equipmentId": 1,
-  "equipmentName": "바벨 벤치 프레스",
-  "queueId": 1,
-  "graceMinutes": 5
-}
-```
-
-#### 3. 휴식 시작 알림
-```json
-{
-  "type": "REST_STARTED",
-  "title": "휴식 시작",
-  "message": "1/3 세트 완료. 2분 휴식",
-  "equipmentId": 1
-}
-```
-
-#### 4. 다음 세트 시작 알림
-```json
-{
-  "type": "NEXT_SET_STARTED",
-  "title": "다음 세트",
-  "message": "2/3 세트 시작",
-  "equipmentId": 1
-}
-```
-
-#### 5. 대기 만료 알림
-```json
-{
-  "type": "QUEUE_EXPIRED",
-  "title": "대기 만료",
-  "message": "시간 초과로 대기에서 제외되었습니다",
-  "equipmentId": 1
-}
-```
-### 알림 리스트에 저장되는 타입 (3가지)
-1. **EQUIPMENT_AVAILABLE** (우선순위 10) - 대기한 기구 사용 가능 | 카테고리: queue
-2. **QUEUE_EXPIRED** (우선순위 8) - 대기 시간 초과로 제외됨 | 카테고리: queue
-3. **WAITING_COUNT** (우선순위 4) - 내 뒤 대기자 수 알림 | 카테고리: eta
-
-**참고**: 나머지 알림(휴식 시작, 다음 세트, 운동 완료 등)은 WebSocket으로만 실시간 전송되며 이력에 저장되지 않습니다.
-
-### 알림 리스트 타입 목록
-알림 타입 목록
-1. EQUIPMENT_AVAILABLE (우선순위 10)
-대기한 기구 사용 가능
-카테고리: queue
- 2. WORKOUT_COMPLETED (우선순위 9)
-운동 완료 축하
-카테고리: workout
- 3. QUEUE_EXPIRED (우선순위 8)
-대기 시간 초과로 제외
-카테고리: queue
- 4. EXERCISE_STOPPED (우선순위 7)
-운동 중단
-카테고리: workout
- 5. QUEUE_CANCELLED_CONFIRMATION (우선순위 6)
-대기 취소 확인
-카테고리: queue
- 6. REST_STARTED (우선순위 6)
-휴식 시작
-카테고리: workout
- 7. NEXT_SET_STARTED (우선순위 5)
-다음 세트 시작
-카테고리: workout
- 8. REST_SKIPPED (우선순위 5)
-휴식 건너뛰기
-카테고리: workout
- 9. WAITING_COUNT (우선순위 4)
-내 뒤 대기자 수
-카테고리: eta
- 10. ETA_UPDATED (우선순위 3)
-예상 대기시간 업데이트
-카테고리: eta
-11. AUTO_ETA_UPDATE (우선순위 2)
-자동 ETA 업데이트
-카테고리: eta
-### 알림 리스트 주의사항
-1. 자동 정리: 30일 이상 된 읽은 알림은 자동 삭제됩니다
-2. 최대 조회 기간: 30일까지만 조회 가능합니다
-3. 페이지네이션: 한 번에 최대 100개까지만 조회 가능합니다
-4. 우선순위: 안읽은 알림 → 우선순위 높은 것 → 최신순으로 정렬됩니다
-5. WebSocket: 실시간 알림은 WebSocket으로 전송되며, DB에도 함께 저장됩니다
-
-## 🚨 에러 처리
-
-모든 API는 다음 형식의 에러 응답을 반환합니다:
-
-```json
-{
-  "error": "에러 메시지",
-  "details": "상세 정보 (선택사항)"
-}
-```
-
-### 주요 HTTP 상태 코드
-- `200`: 성공
-- `201`: 생성 성공
-- `204`: 삭제 성공 (응답 바디 없음)
-- `400`: 잘못된 요청 (입력 형식 오류)
-- `401`: 인증 필요
-- `403`: 권한 없음
-- `404`: 리소스 없음
-- `409`: 충돌 (중복 예약, 이미 사용 중 등)
-- `500`: 서버 오류
-
-## 💡 사용 팁
-
-1. **토큰 관리**: JWT 토큰은 localStorage에 저장하고, 모든 인증이 필요한 API 호출 시 `Authorization: Bearer {token}` 헤더에 포함
-
-2. **실시간 업데이트**: 웨이팅 시스템 관련 화면에서는 WebSocket 연결을 유지하여 실시간 알림 수신
-
-3. **에러 처리**: 409 에러의 경우 사용자에게 명확한 안내 메시지 표시 (이미 사용 중, 대기 중 등)
-
-4. **상태 폴링**: WebSocket이 연결되지 않은 상황에서는 `/api/waiting/status/{equipmentId}` 엔드포인트를 주기적으로 호출
-
-5. **기구 상태 표시**: 각 기구의 현재 상태(사용 가능, 사용 중, 대기 인원)를 명확히 표시
-
-## ✨ 주요 특징
-
-### 🔔 **실시간 알림 시스템**
-- WebSocket 기반 즉시 알림
-- 브라우저 푸시 알림 + 진동(모바일)
-- 5분 유예시간 자동 관리
-
-### 🏋️ **세트별 운동 진행 추적**
-- 1~20세트 자유 설정 (기본 3세트)
-- 세트 완료 → 자동 휴식 타이머 → 다음 세트 시작
-- 마지막 세트 완료 시 **자동으로 다음 사람에게**
-- 실시간 진행률 표시 및 남은 휴식시간 카운트다운
-
-### 📱 **직관적인 사용 경험**
-- **시간 입력 불필요** - 대기열 등록만 하면 끝
-- 현재 상태 한눈에 파악 (운동 중 vs 휴식 중)
-- 유연한 제어 (휴식 건너뛰기, 운동 중단)
-- 크로스 플랫폼 반응형 지원
-
-### 🔄 **자동 대기열 관리**
-- 공정한 FIFO(First In, First Out) 순서
-- 취소/만료 시 자동 순번 재배치
-- 실시간 대기 현황 모니터링
-
-
-## 🛠 기술 스택
-
-### Backend
-- **Node.js** + **Express.js** - REST API 서버
-- **WebSocket (ws)** - 실시간 통신
-- **Prisma ORM** - 데이터베이스 관리
-- **PostgreSQL** - 데이터베이스
-- **Passport.js** - Google OAuth 인증
-- **JWT** - 토큰 기반 인증
-
-
-## 📱 사용 방법
-
-### 1. 회원가입 및 로그인
-- Google 계정으로 간편 로그인 (OAuth 2.0)
-- 최초 로그인 시 자동 회원가입
-
-### 2. 기구 둘러보기
-- 카테고리별 기구 목록 (가슴, 등, 다리, 어깨, 팔, 유산소, 복근)
-- 실시간 사용 현황 및 대기열 정보 확인
-
-### 3. 웨이팅 시스템 사용하기
-
-#### Case 1: 기구가 비어있을 때
-```
-1. 기구 선택
-2. 운동 설정 (세트 수, 휴식 시간)
-3. "바로 시작" 클릭
-4. 세트별 운동 진행
-5. 자동 완료 → 다음 대기자에게 알림
-```
-
-#### Case 2: 기구가 사용 중일 때
-```
-1. 기구 선택
-2. "대기열 등록" 클릭 → 순번 받기
-3. 대기 중 (실시간 순번 확인)
-4. 알림 받기 "기구 사용 가능!" (5분 유예시간)
-5. "운동 시작" 클릭
-6. 세트별 운동 진행
-7. 자동 완료 → 다음 대기자에게 알림
-```
-
-### 4. 세트별 운동 진행
-- **세트 시작**: 자동으로 현재 세트 표시
-- **세트 완료**: "세트 완료" 버튼 → 자동 휴식 시작
-- **휴식 중**: 카운트다운 타이머 → 자동으로 다음 세트
-- **휴식 건너뛰기**: "다음 세트 시작" 버튼으로 즉시 다음 세트
-- **운동 중단**: "중단" 버튼으로 언제든 종료 가능
-
-## 🔄 운동 플로우 상세
-
-### 🎯 **세트별 진행 예시** (3세트, 3분 휴식)
-
-```mermaid
-graph TD
-    A[운동 시작] --> B[세트 1 운동 중]
-    B --> C[세트 완료 버튼]
-    C --> D[3분 휴식 타이머]
-    D --> E[자동으로 세트 2 시작]
-    E --> F[세트 완료 버튼]
-    F --> G[3분 휴식 타이머]
-    G --> H[자동으로 세트 3 시작]
-    H --> I[세트 완료 버튼]
-    I --> J[🎉 전체 운동 완료]
-    J --> K[다음 대기자에게 자동 알림]
-    
-    D --> L[휴식 건너뛰기]
-    L --> E
-    G --> M[휴식 건너뛰기]
-    M --> H
-    
-    B --> N[운동 중단]
-    E --> N
-    H --> N
-    N --> K
-```
-
+----
