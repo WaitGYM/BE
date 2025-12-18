@@ -14,8 +14,12 @@ model User {
   name  String
 
   // OAuth 전용 필드
-  googleId String  @unique
+  googleId String? @unique
   avatar   String?
+
+  // 🆕 게스트 사용자 필드 추가
+  isGuest        Boolean   @default(false)
+  guestExpiresAt DateTime?
 
   createdAt DateTime   @default(now())
   favorites Favorite[]
@@ -24,7 +28,7 @@ model User {
   equipmentUsages EquipmentUsage[]
   waitingQueues   WaitingQueue[]
 
-  // 🆕 루틴 시스템 관계
+  // 루틴 시스템 관계
   workoutRoutines WorkoutRoutine[]
 
   notifications Notification[]
@@ -84,7 +88,7 @@ model EquipmentUsage {
 
   createdAt DateTime @default(now())
 
-  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Restrict)
 
   @@index([equipmentId, status])
@@ -103,6 +107,7 @@ model WaitingQueue {
 
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
   @@index([equipmentId, queuePosition])
   @@index([equipmentId, status])
 }
@@ -137,37 +142,37 @@ model RoutineExercise {
   routine   WorkoutRoutine @relation(fields: [routineId], references: [id], onDelete: Cascade)
   equipment Equipment      @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
 
- // 한 루틴에 같은 기구 중복 방지
+  // 한 루틴에 같은 기구 중복 방지
   @@unique([routineId, order]) //한 루틴에서 순서는 중복 불가
   @@index([routineId, order])
 }
 
 model Notification {
-  id          Int      @id @default(autoincrement())
-  userId      Int
-  type        String   // EQUIPMENT_AVAILABLE, REST_STARTED, NEXT_SET_STARTED, EXERCISE_STOPPED 등
-  category    String   // queue, workout, eta, other
-  priority    Int      @default(5) // 1-10
-  
-  title       String
-  message     String
-  isRead      Boolean  @default(false)
-  
+  id       Int    @id @default(autoincrement())
+  userId   Int
+  type     String // EQUIPMENT_AVAILABLE, REST_STARTED, NEXT_SET_STARTED, EXERCISE_STOPPED 등
+  category String // queue, workout, eta, other
+  priority Int    @default(5) // 1-10
+
+  title   String
+  message String
+  isRead  Boolean @default(false)
+
   // 관련 정보
   equipmentId   Int?
   equipmentName String?
   queueId       Int?
   usageId       Int?
-  
+
   // 메타데이터 (JSON으로 추가 정보 저장)
-  metadata    Json?
-  
-  createdAt   DateTime @default(now())
-  readAt      DateTime?
-  
-  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  equipment   Equipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
-  
+  metadata Json?
+
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  equipment Equipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
+
   @@index([userId, createdAt])
   @@index([userId, isRead])
   @@index([userId, category])

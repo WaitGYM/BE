@@ -143,6 +143,9 @@ server.listen(PORT, () => {
   
   // 알림 자동 정리 작업 시작
   //scheduleNotificationCleanup();
+
+  // 🆕 게스트 정리 스케줄러 시작
+  scheduleGuestCleanup();
 });
 
 /** ===================== 알림 자동 정리 스케줄러 ===================== */
@@ -176,6 +179,66 @@ function scheduleNotificationCleanup() {
   scheduleDaily();
   console.log('🧹 알림 자동 정리 스케줄러 시작 (매일 자정 KST)');
 }
+
+/** ===================== 🆕 게스트 계정 자동 정리 스케줄러 ===================== */
+async function cleanupExpiredGuests() {
+  try {
+    const now = new Date();
+    
+    // 만료된 게스트 찾기
+    const expiredGuests = await prisma.user.findMany({
+      where: {
+        isGuest: true,
+        guestExpiresAt: {
+          lte: now
+        }
+      },
+      select: { id: true, email: true, name: true }
+    });
+
+    if (expiredGuests.length === 0) return 0;
+
+    console.log(`[Guest Cleanup] ${expiredGuests.length}개의 만료된 게스트 계정 발견:`, 
+      expiredGuests.map(g => g.name).join(', '));
+
+    // 관련 데이터 삭제 (Cascade 설정되어 있으면 자동 삭제됨)
+    const deleted = await prisma.user.deleteMany({
+      where: {
+        id: {
+          in: expiredGuests.map(g => g.id)
+        }
+      }
+    });
+
+    return deleted.count;
+  } catch (error) {
+    console.error('[Guest Cleanup] 오류:', error);
+    throw error;
+  }
+}
+
+function scheduleGuestCleanup() {
+  // 시작 시 즉시 한 번 실행
+  cleanupExpiredGuests().catch(err => {
+    console.error('[Guest Cleanup] 초기 정리 실패:', err);
+  });
+
+  // 30분마다 자동 정리
+  setInterval(() => {
+    cleanupExpiredGuests()
+      .then(count => {
+        if (count > 0) {
+          console.log(`[Guest Cleanup] ${count}개의 만료된 게스트 계정 삭제됨`);
+        }
+      })
+      .catch(err => {
+        console.error('[Guest Cleanup] 정리 실패:', err);
+      });
+  }, 30 * 60 * 1000);  // 30분
+
+  console.log('🧹 게스트 계정 자동 정리 스케줄러 시작 (30분마다)');
+}
+
 
 /** ===================== 그레이스풀 종료 ===================== */
 function shutdown(signal) {
