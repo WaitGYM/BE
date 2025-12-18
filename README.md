@@ -1,7 +1,23 @@
 # 헬스장 웨이팅 시스템 (Gym Waiting System)
 
 > **실시간 기구 대기열 관리 시스템** - 줄서기 방식으로 공정하고 효율적인 헬스장 기구 사용
-
+## 추가된 API 12.18
+- `POST /api/auth/guest - 게스트 로그인 기능
+- 요청 바디 : 없음
+- 응답
+  ```json
+  {
+    "message": "게스트로 로그인했습니다",
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTcsImVtYWlsIjoiZ3Vlc3RfMTc2NTk4MDc2NzAyMF80cmN6MHljNHFAZ3Vlc3QudGVtcCIsImlzR3Vlc3QiOnRydWUsImlhdCI6MTc2NTk4MDc2NywiZXhwIjoxNzY1OTkxNTY3fQ.EsfacZEqLD079R4bXBnC10H9sBkQ-GXjGJoL-_ZoKCg",
+    "user": {
+        "id": 17,
+        "email": "guest_1765980767020_4rcz0yc4q@guest.temp",
+        "name": "Guest_1765980767020_4rcz0yc4q",
+        "isGuest": true,
+        "expiresAt": "2025-12-17T17:12:47.020Z"
+    }
+  }
+  ```
 ## 📖 개요
 시간 예약 없이 **현장 대기열(웨이팅)** 방식으로 헬스장 기구를 관리하는 시스템입니다.
 - 줄서기 방식의 공정한 순서 관리
@@ -932,7 +948,7 @@ Authorization: Bearer <your-jwt-token>
 
 ## 추가된 API 1108
 ### 1. **루틴 수정(부분 변경) 전용 엔드포인트**
-  - `PATCH /api/routines/:routineId/name` — 루틴 이름만 변경
+- `PATCH /api/routines/:routineId/name` — 루틴 이름만 변경
 - 요청 바디
   ```json
   { "name": "강화된 하체 루틴" }
