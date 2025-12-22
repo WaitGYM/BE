@@ -99,23 +99,6 @@ GET    /api/favorites/check/:equipmentId         # 상태 확인
 
 ## 🔔 WebSocket 실시간 알림
 
-### 연결 및 인증
-```javascript
-const ws = new WebSocket('ws://localhost:4000/ws');
-
-ws.onopen = () => {
-  ws.send(JSON.stringify({
-    type: 'auth',
-    token: 'your-jwt-token'
-  }));
-};
-
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log('알림:', data);
-};
-```
-
 ### 주요 이벤트
 - **클라이언트 → 서버**
   - `auth` - JWT 토큰 인증
