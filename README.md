@@ -233,40 +233,6 @@ gym-waiting-system/
 └── .env                      # 환경 변수
 ```
 
-## 💡 개발 팁
-
-### 실시간 상태 관리
-```javascript
-// ✅ 좋은 예: WebSocket 구독
-ws.send({ type: 'subscribe_equipment', equipmentId: 12 });
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  updateUI(data);
-};
-
-// ❌ 나쁜 예: 폴링
-setInterval(() => {
-  fetch('/api/equipment/status?equipmentIds=1,2,3');
-}, 5000);
-```
-
-### 에러 처리
-```javascript
-try {
-  const res = await fetch('/api/waiting/queue/12', {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  
-  if (res.status === 409) {
-    showMessage('이미 대기열에 등록되어 있습니다');
-  } else if (res.status === 403) {
-    showMessage('먼저 대기열에 등록해주세요');
-  }
-} catch (error) {
-  showError('네트워크 오류');
-}
-```
-
 ## 📝 주요 특징
 
 - ✅ 시간 예약 없는 간단한 대기열 시스템
