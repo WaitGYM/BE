@@ -1,6 +1,26 @@
-# 🏋️ 헬스장 웨이팅 시스템
+<div align="center">
 
-> **실시간 기구 대기열 관리 시스템** - 줄서기 방식으로 공정하고 효율적인 헬스장 기구 사용
+# 💪 기다려짐 - Backend
+
+<span style="color:#808080">헬스장에서 지루한 대기시간이 **기다려짐**</span>
+
+[![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?logo=node.js)](https://nodejs.org/)
+[![Express](https://img.shields.io/badge/Express-4.x-000000?logo=express)](https://expressjs.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql)](https://www.postgresql.org/)
+[![Prisma](https://img.shields.io/badge/Prisma-5.x-2D3748?logo=prisma)](https://www.prisma.io/)
+
+[🌐 서비스 바로가기](https://waitgym.life) |
+[🔗 Organization](https://github.com/WaitGYM) |
+[🎨 Frontend Repository](https://github.com/WaitGYM/FE)
+
+---
+
+</div>
+
+## 📖 프로젝트 소개
+
+헬스장에서 불편한 대면 및 대기상황으로 인해 플랜진행이 어려운 문제해결을 위한  
+효율적인 플랜진행을 돕는 **기구 대기 서비스 "기다려짐"** 의 백엔드 서버입니다.
 
 ## 🛠 기술 스택
 
@@ -12,6 +32,7 @@
 ## 🚀 주요 API
 
 ### 🔐 인증
+
 ```http
 POST  /api/auth/guest                  # 게스트 로그인
 GET   /api/auth/google                 # Google OAuth 로그인
@@ -21,6 +42,7 @@ POST  /api/auth/logout                 # 로그아웃
 ```
 
 ### 🏋️ 기구 관리
+
 ```http
 GET   /api/equipment                        # 기구 목록
 GET   /api/equipment/search                 # 기구 검색
@@ -34,6 +56,7 @@ GET   /api/equipment/today-total-time       # 오늘 총 운동시간
 ```
 
 ### ⏰ 웨이팅 시스템
+
 ```http
 POST   /api/waiting/queue/:equipmentId        # 대기열 등록
 DELETE /api/waiting/queue/:queueId            # 대기 취소
@@ -48,6 +71,7 @@ POST   /api/waiting/update-eta/:equipmentId   # ETA 수동 업데이트
 ```
 
 ### 📋 루틴 관리
+
 ```http
 GET    /api/routines                                    # 루틴 목록
 POST   /api/routines                                    # 루틴 생성
@@ -80,6 +104,7 @@ PATCH  /api/routines/:id/exercises/:equipmentId/order   # 순서 변경
 ```
 
 ### 🔔 알림
+
 ```http
 GET    /api/notifications                  # 알림 목록
 GET    /api/notifications/unread-count     # 안읽은 알림 수
@@ -90,6 +115,7 @@ PATCH  /api/notifications/read-all         # 전체 읽음
 ```
 
 ### ⭐ 즐겨찾기
+
 ```http
 GET    /api/favorites                            # 즐겨찾기 목록
 POST   /api/favorites/:equipmentId               # 추가
@@ -100,7 +126,9 @@ GET    /api/favorites/check/:equipmentId         # 상태 확인
 ## 🔔 WebSocket 실시간 알림
 
 ### 주요 이벤트
+
 - **클라이언트 → 서버**
+
   - `auth` - JWT 토큰 인증
   - `subscribe_equipment` - 기구 구독
   - `unsubscribe_equipment` - 구독 해제
@@ -114,6 +142,7 @@ GET    /api/favorites/check/:equipmentId         # 상태 확인
   - `workout_completed` - 운동 완료
 
 ### 저장되는 알림 타입 (3가지만 DB 저장)
+
 1. **EQUIPMENT_AVAILABLE** - 기구 사용 가능
 2. **QUEUE_EXPIRED** - 대기 만료
 3. **WAITING_COUNT** - 내 뒤 대기자 수
@@ -123,6 +152,7 @@ GET    /api/favorites/check/:equipmentId         # 상태 확인
 ## 📱 사용 흐름
 
 ### 기구가 비어있을 때
+
 1. 기구 선택
 2. 운동 설정 (세트 수, 휴식 시간)
 3. "바로 시작" 클릭
@@ -130,6 +160,7 @@ GET    /api/favorites/check/:equipmentId         # 상태 확인
 5. 자동 완료 → 다음 대기자에게 알림
 
 ### 기구가 사용 중일 때
+
 1. 기구 선택
 2. "대기열 등록" 클릭
 3. 실시간 순번 확인
@@ -141,40 +172,45 @@ GET    /api/favorites/check/:equipmentId         # 상태 확인
 ## 🔐 인증 방식
 
 모든 인증 필요 API는 헤더에 JWT 토큰 포함:
+
 ```http
 Authorization: Bearer <your-jwt-token>
 ```
 
 ### 게스트 로그인
+
 로그인 없이 12시간 동안 사용 가능한 임시 계정을 생성합니다.
+
 ```http
 POST /api/auth/guest
 ```
 
 ## ⚠️ 에러 코드
 
-| 코드 | 의미 | 사용 사례 |
-|------|------|-----------|
-| 200 | OK | 성공 |
-| 201 | Created | 리소스 생성 성공 |
-| 204 | No Content | 삭제 성공 |
-| 400 | Bad Request | 입력 형식 오류 |
-| 401 | Unauthorized | 인증 필요 |
-| 403 | Forbidden | 권한 없음 |
-| 404 | Not Found | 리소스 없음 |
-| 409 | Conflict | 중복/충돌 |
-| 429 | Too Many Requests | Rate Limit 초과 |
-| 500 | Server Error | 서버 오류 |
+| 코드 | 의미              | 사용 사례        |
+| ---- | ----------------- | ---------------- |
+| 200  | OK                | 성공             |
+| 201  | Created           | 리소스 생성 성공 |
+| 204  | No Content        | 삭제 성공        |
+| 400  | Bad Request       | 입력 형식 오류   |
+| 401  | Unauthorized      | 인증 필요        |
+| 403  | Forbidden         | 권한 없음        |
+| 404  | Not Found         | 리소스 없음      |
+| 409  | Conflict          | 중복/충돌        |
+| 429  | Too Many Requests | Rate Limit 초과  |
+| 500  | Server Error      | 서버 오류        |
 
 ## 📊 Rate Limiting
 
 ### ETA 수동 업데이트 제한
+
 - 1분당 3회 제한
 - 쿨다운: 10초 (연속 요청 방지)
 
 ## 🏗 아키텍처 특징
 
 ### 이벤트 기반 아키텍처
+
 ```
 ┌─────────────────────────────────┐
 │ Routes (API Endpoints)          │ ← HTTP 요청 처리
@@ -188,6 +224,7 @@ POST /api/auth/guest
 ```
 
 ### 핵심 설계 원칙
+
 1. **단일 책임 원칙** - 각 파일은 하나의 책임만
 2. **계층 분리** - 단방향 의존만 허용
 3. **이벤트 중심** - 느슨한 결합
@@ -230,3 +267,40 @@ gym-waiting-system/
 ---
 
 **Backend API Server** | Node.js + Express.js + PostgreSQL + WebSocket
+
+---
+
+## 👥 멤버 소개
+
+<div align="center">
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/uri122">
+        <img src="https://avatars.githubusercontent.com/u/64038879?v=4" width="100" alt="uri"/>
+      </a><br />
+      <a href="https://github.com/uri122"><b>최우리</b></a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/Cokowa">
+        <img src="https://avatars.githubusercontent.com/u/102285805?v=4" width="100" alt="개발자2"/>
+      </a><br />
+      <a href="https://github.com/Cokowa"><b>박수현</b></a>
+    </td>
+  </tr>
+</table>
+</div>
+
+---
+
+## 📆 프로젝트 기간
+
+- 개발 기간: `2025.08 ~ 진행중`
+
+---
+
+<div align="center">
+
+Copyright 기다려짐. All rights reserved.
+
+</div>
