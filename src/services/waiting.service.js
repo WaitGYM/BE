@@ -1,9 +1,9 @@
 // src/services/waiting.service.js
-const prisma = require('../lib/prisma');
-const eventBus = require('../events/eventBus');
-const { calculateRealTimeETA, buildQueueETAs } = require('../utils/eta');
-const { computeCompleteSetSummary, hms } = require('../utils/time');
-const { saveNotification } = require('./notification.service');
+const prisma = require("../lib/prisma");
+const eventBus = require("../events/eventBus");
+const { calculateRealTimeETA, buildQueueETAs } = require("../utils/eta");
+const { computeCompleteSetSummary, hms } = require("../utils/time");
+const { saveNotification } = require("./notification.service");
 
 // 스팸 방지를 위한 메모리 캐시: 장비별 최근 전송 상태
 const lastWaitNotice = new Map(); // key: equipmentId, value: { count, ts }
@@ -29,14 +29,14 @@ function checkRateLimit(userId) {
     return {
       allowed: false,
       remainingMs: RATE_LIMIT.COOLDOWN_MS - (now - rec.lastUpdate),
-      reason: 'cooldown'
+      reason: "cooldown",
     };
   }
   if (rec.requestCount >= RATE_LIMIT.MAX_REQUESTS) {
     return {
       allowed: false,
       remainingMs: RATE_LIMIT.WINDOW_MS - (now - rec.lastUpdate),
-      reason: 'rate_limit'
+      reason: "rate_limit",
     };
   }
   rec.requestCount++;
@@ -71,11 +71,16 @@ function computeSummaryOnComplete(usage, now = new Date()) {
 function computeStopSummary(usage, now = new Date()) {
   const accWork = Math.max(0, Number(WORK_ACC_CACHE.get(usage.id) || 0));
   const startedAt = usage.startedAt ? new Date(usage.startedAt) : null;
-  const totalDurationSec = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
-  
+  const totalDurationSec = startedAt
+    ? Math.max(0, Math.floor((now - startedAt) / 1000))
+    : 0;
+
   let inFlightWorkSec = 0;
-  if (usage.setStatus === 'EXERCISING' && usage.currentSetStartedAt) {
-    inFlightWorkSec = Math.max(0, Math.floor((now - new Date(usage.currentSetStartedAt)) / 1000));
+  if (usage.setStatus === "EXERCISING" && usage.currentSetStartedAt) {
+    inFlightWorkSec = Math.max(
+      0,
+      Math.floor((now - new Date(usage.currentSetStartedAt)) / 1000)
+    );
   }
 
   const workTimeSec = accWork + inFlightWorkSec;
@@ -96,56 +101,61 @@ const autoUpdateIntervals = new Map();
 
 async function startAutoUpdate(equipmentId) {
   if (autoUpdateIntervals.has(equipmentId)) return;
-  
-  const id = setInterval(async () => {
-    try {
-      const currentUsage = await prisma.equipmentUsage.findFirst({
-        where: { equipmentId, status: 'IN_USE' },
-        include: { user: { select: { name: true } }, equipment: true },
-      });
-      
-      if (!currentUsage) return stopAutoUpdate(equipmentId);
-      
-      const queue = await prisma.waitingQueue.findMany({
-        where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } },
-        orderBy: { queuePosition: 'asc' },
-        include: { user: { select: { name: true } } },
-      });
-      
-      if (queue.length === 0) return stopAutoUpdate(equipmentId);
-      
-      const currentETA = calculateRealTimeETA(currentUsage);
-      const queueETAs = buildQueueETAs(currentETA, queue);
-      
-      // 이벤트 발행 (WebSocket 전용)
-      eventBus.emitETAUpdate(equipmentId, {
-        equipmentId,
-        equipmentName: currentUsage.equipment.name,
-        currentUsage: {
-          userName: currentUsage.user.name,
-          totalSets: currentUsage.totalSets,
-          currentSet: currentUsage.currentSet,
-          setStatus: currentUsage.setStatus,
-          estimatedMinutesLeft: currentETA,
-          progress: Math.round((currentUsage.currentSet / currentUsage.totalSets) * 100),
-        },
-        waitingQueue: queue.map((q, i) => ({
-          id: q.id,
-          position: q.queuePosition,
-          userName: q.user.name,
-          estimatedWaitMinutes: queueETAs[i],
-        })),
-        lastUpdated: new Date(),
-        isAutoUpdate: true,
-      });
-      
-      // ❌ 알림 저장/전송 제거 - 자동 업데이트는 WebSocket만
-    } catch (e) {
-      console.error('자동 ETA 업데이트 오류:', e);
-      stopAutoUpdate(equipmentId);
-    }
-  }, 2 * 60 * 1000);
-  
+
+  const id = setInterval(
+    async () => {
+      try {
+        const currentUsage = await prisma.equipmentUsage.findFirst({
+          where: { equipmentId, status: "IN_USE" },
+          include: { user: { select: { name: true } }, equipment: true },
+        });
+
+        if (!currentUsage) return stopAutoUpdate(equipmentId);
+
+        const queue = await prisma.waitingQueue.findMany({
+          where: { equipmentId, status: { in: ["WAITING", "NOTIFIED"] } },
+          orderBy: { queuePosition: "asc" },
+          include: { user: { select: { name: true } } },
+        });
+
+        if (queue.length === 0) return stopAutoUpdate(equipmentId);
+
+        const currentETA = calculateRealTimeETA(currentUsage);
+        const queueETAs = buildQueueETAs(currentETA, queue);
+
+        // 이벤트 발행 (WebSocket 전용)
+        eventBus.emitETAUpdate(equipmentId, {
+          equipmentId,
+          equipmentName: currentUsage.equipment.name,
+          currentUsage: {
+            userName: currentUsage.user.name,
+            totalSets: currentUsage.totalSets,
+            currentSet: currentUsage.currentSet,
+            setStatus: currentUsage.setStatus,
+            estimatedMinutesLeft: currentETA,
+            progress: Math.round(
+              (currentUsage.currentSet / currentUsage.totalSets) * 100
+            ),
+          },
+          waitingQueue: queue.map((q, i) => ({
+            id: q.id,
+            position: q.queuePosition,
+            userName: q.user.name,
+            estimatedWaitMinutes: queueETAs[i],
+          })),
+          lastUpdated: new Date(),
+          isAutoUpdate: true,
+        });
+
+        // ❌ 알림 저장/전송 제거 - 자동 업데이트는 WebSocket만
+      } catch (e) {
+        console.error("자동 ETA 업데이트 오류:", e);
+        stopAutoUpdate(equipmentId);
+      }
+    },
+    2 * 60 * 1000
+  );
+
   autoUpdateIntervals.set(equipmentId, id);
 }
 
@@ -160,15 +170,15 @@ function stopAutoUpdate(equipmentId) {
 // ===== Queue Utils =====
 async function reorderQueue(equipmentId) {
   const rows = await prisma.waitingQueue.findMany({
-    where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } },
-    orderBy: { createdAt: 'asc' },
+    where: { equipmentId, status: { in: ["WAITING", "NOTIFIED"] } },
+    orderBy: { createdAt: "asc" },
   });
-  
+
   for (let i = 0; i < rows.length; i++) {
     if (rows[i].queuePosition !== i + 1) {
       await prisma.waitingQueue.update({
         where: { id: rows[i].id },
-        data: { queuePosition: i + 1 }
+        data: { queuePosition: i + 1 },
       });
     }
   }
@@ -177,134 +187,118 @@ async function reorderQueue(equipmentId) {
 
 async function notifyNextUser(equipmentId) {
   const next = await prisma.waitingQueue.findFirst({
-    where: { equipmentId, status: 'WAITING' },
-    orderBy: { queuePosition: 'asc' },
+    where: { equipmentId, status: "WAITING" },
+    orderBy: { queuePosition: "asc" },
     include: { user: true, equipment: true },
   });
-  
+
   if (!next) return false;
-  
+
   const userCurrentUsage = await prisma.equipmentUsage.findFirst({
-    where: { userId: next.userId, status: 'IN_USE' },
-    include: { equipment: true }
+    where: { userId: next.userId, status: "IN_USE" },
+    include: { equipment: true },
   });
-  
+
   await prisma.waitingQueue.update({
     where: { id: next.id },
-    data: { status: 'NOTIFIED', notifiedAt: new Date() }
+    data: { status: "NOTIFIED", notifiedAt: new Date() },
   });
-  
+
   // ✅ EQUIPMENT_AVAILABLE 알림만 저장/전송
   let notificationMessage = `예약한 ${next.equipment.name} 자리가 비었어요`;
-  let additionalInfo = {};
-  
-  if (userCurrentUsage) {
-    if (userCurrentUsage.setStatus === 'RESTING') {
-      notificationMessage = `예약한 ${next.equipment.name} 자리가 비었어요. (현재 ${userCurrentUsage.equipment.name} 휴식 중)`;
-      additionalInfo.currentEquipmentStatus = {
-        equipmentName: userCurrentUsage.equipment.name,
-        status: 'resting',
-        message: '휴식을 마치고 기구를 전환하세요'
-      };
-    } else if (userCurrentUsage.setStatus === 'EXERCISING') {
-      notificationMessage = `예약한 ${next.equipment.name} 자리가 비었어요. (현재 ${userCurrentUsage.equipment.name} 운동 중)`;
-      additionalInfo.currentEquipmentStatus = {
-        equipmentName: userCurrentUsage.equipment.name,
-        status: 'exercising',
-        message: '현재 운동을 완료한 후 기구를 전환하세요',
-        warning: '두 기구를 동시에 사용할 수 없습니다'
-      };
-    }
-  }
-  
+
   // DB 저장 + 이벤트 발행
   await sendAndSaveNotification(next.userId, {
-    type: 'EQUIPMENT_AVAILABLE',
-    title: '기구 사용 가능',
+    type: "EQUIPMENT_AVAILABLE",
+    title: "기구 사용 가능",
     message: notificationMessage,
     equipmentId,
     equipmentName: next.equipment.name,
     queueId: next.id,
     graceMinutes: 5,
-    ...additionalInfo
   });
-  
+
   // 상태 변경 이벤트 발행 (WebSocket 전용)
   eventBus.emitEquipmentStatusChange(equipmentId, {
-    type: 'next_user_notified',
+    type: "next_user_notified",
     equipmentName: next.equipment.name,
     nextUserName: next.user.name,
     queuePosition: next.queuePosition,
   });
-  
-  setTimeout(async () => {
-    const fresh = await prisma.waitingQueue.findUnique({ where: { id: next.id } });
-    if (fresh && fresh.status === 'NOTIFIED') {
-      await prisma.waitingQueue.update({
+
+  setTimeout(
+    async () => {
+      const fresh = await prisma.waitingQueue.findUnique({
         where: { id: next.id },
-        data: { status: 'EXPIRED' }
       });
-      
-      // ✅ QUEUE_EXPIRED 알림 저장/전송
-      await sendAndSaveNotification(next.userId, {
-        type: 'QUEUE_EXPIRED',
-        title: '대기 만료',
-        message: '시간 초과로 대기에서 제외되었습니다',
-        equipmentId,
-        equipmentName: next.equipment.name,
-      });
-      
-      await reorderQueue(equipmentId);
-      await notifyNextUser(equipmentId);
-    }
-  }, 5 * 60 * 1000);
-  
+      if (fresh && fresh.status === "NOTIFIED") {
+        await prisma.waitingQueue.update({
+          where: { id: next.id },
+          data: { status: "EXPIRED" },
+        });
+
+        // ✅ QUEUE_EXPIRED 알림 저장/전송
+        await sendAndSaveNotification(next.userId, {
+          type: "QUEUE_EXPIRED",
+          title: "대기 만료",
+          message: "시간 초과로 대기에서 제외되었습니다",
+          equipmentId,
+          equipmentName: next.equipment.name,
+        });
+
+        await reorderQueue(equipmentId);
+        await notifyNextUser(equipmentId);
+      }
+    },
+    5 * 60 * 1000
+  );
+
   return true;
 }
 
 // ===== Waiting Count Notifier =====
 async function notifyCurrentUserWaitingCount(equipmentId, opts = {}) {
   const { sendZero = false, cooldownMs = 60_000 } = opts;
-  
+
   const usage = await prisma.equipmentUsage.findFirst({
-    where: { equipmentId, status: 'IN_USE' },
-    select: { userId: true }
+    where: { equipmentId, status: "IN_USE" },
+    select: { userId: true },
   });
-  
+
   if (!usage) return false;
-  
+
   const [waitingCount, eq] = await Promise.all([
     prisma.waitingQueue.count({
-      where: { equipmentId, status: { in: ['WAITING', 'NOTIFIED'] } }
+      where: { equipmentId, status: { in: ["WAITING", "NOTIFIED"] } },
     }),
     prisma.equipment.findUnique({
       where: { id: equipmentId },
-      select: { name: true }
-    })
+      select: { name: true },
+    }),
   ]);
-  
+
   if (!sendZero && waitingCount <= 0) return false;
-  
+
   const now = Date.now();
   const prev = lastWaitNotice.get(equipmentId);
-  
-  if (prev && prev.count === waitingCount && (now - prev.ts) < cooldownMs) {
+
+  if (prev && prev.count === waitingCount && now - prev.ts < cooldownMs) {
     return false;
   }
-  
+
   lastWaitNotice.set(equipmentId, { count: waitingCount, ts: now });
-  
+
   // ✅ WAITING_COUNT 알림 저장/전송
   await sendAndSaveNotification(usage.userId, {
-    type: 'WAITING_COUNT',
-    title: '대기자 알림',
+    type: "WAITING_COUNT",
+    title: "대기자 알림",
     message: `내 뒤에 기다리는 사람이 ${waitingCount}명 있어요`,
     equipmentId,
-    equipmentName: eq?.name ?? '',
+    equipmentName: eq?.name ?? "",
     waitingCount,
-    at: new Date().toISOString()
+    at: new Date().toISOString(),
   });
-  
+
   return true;
 }
 
@@ -318,7 +312,7 @@ async function sendAndSaveNotification(userId, payload) {
 // ===== 🆕 사용자 운동 조회 헬퍼 =====
 async function getCurrentUsage(userId) {
   return await prisma.equipmentUsage.findFirst({
-    where: { userId, status: 'IN_USE' },
+    where: { userId, status: "IN_USE" },
     include: {
       equipment: {
         select: {
@@ -326,11 +320,11 @@ async function getCurrentUsage(userId) {
           name: true,
           category: true,
           imageUrl: true,
-          muscleGroup: true
-        }
+          muscleGroup: true,
+        },
       },
-      user: { select: { id: true, name: true } }
-    }
+      user: { select: { id: true, name: true } },
+    },
   });
 }
 
@@ -339,7 +333,7 @@ async function getUsageByEquipment(userId, equipmentId) {
     where: {
       equipmentId,
       userId,
-      status: 'IN_USE'
+      status: "IN_USE",
     },
     include: {
       equipment: {
@@ -348,11 +342,11 @@ async function getUsageByEquipment(userId, equipmentId) {
           name: true,
           category: true,
           imageUrl: true,
-          muscleGroup: true
-        }
+          muscleGroup: true,
+        },
       },
-      user: { select: { id: true, name: true } }
-    }
+      user: { select: { id: true, name: true } },
+    },
   });
 }
 
