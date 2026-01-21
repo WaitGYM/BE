@@ -1,8 +1,6 @@
 <div align="center">
 
-# 💪 기다려짐 - Backend
-
-<span style="color:#808080">헬스장에서 지루한 대기시간이 **기다려짐**</span>
+![기다려짐](./readme/00.png)
 
 [![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?logo=node.js)](https://nodejs.org/)
 [![Express](https://img.shields.io/badge/Express-4.x-000000?logo=express)](https://expressjs.com/)
