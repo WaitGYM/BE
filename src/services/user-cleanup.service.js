@@ -12,8 +12,8 @@ async function cleanupUserActivities(userId, reason = "logout") {
     stopAutoUpdate,
     clearWorkAcc,
     reorderQueue,
+    computeStopSummary,
   } = require("./waiting.service");
-  const { computeStopSummary } = require("../utils/time");
 
   const result = {
     workoutStopped: false,
