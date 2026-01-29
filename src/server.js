@@ -1,132 +1,140 @@
 // src/server.js
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const session = require('express-session');
-const http = require('http');
-const passport = require('passport');
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const session = require("express-session");
+const http = require("http");
+const passport = require("passport");
 
 // 🔥 이벤트 버스를 가장 먼저 로드 (순환 참조 방지)
-const eventBus = require('./events/eventBus');
+const eventBus = require("./events/eventBus");
 
 // Passport 설정 로드
-require('./config/passport');
+require("./config/passport");
 
-// WebSocket 설정
-const { setupWebSocket } = require('./websocket');
+// 🆕 Socket.IO 설정 (WebSocket 대체)
+const { initializeSocketServer } = require("./socket/socket.server");
 
 // Routes
-const authRoutes = require('./routes/auth');
-const equipmentRoutes = require('./routes/equipment');
-const favoriteRoutes = require('./routes/favorites');
-const { router: waitingRoutes } = require('./routes/waiting');
-const routineRoutes = require('./routes/routines');
-const notificationRoutes = require('./routes/notifications');
-
-// 알림 정리 서비스
-//const { cleanupOldNotifications } = require('./services/notification.service');
+const authRoutes = require("./routes/auth");
+const equipmentRoutes = require("./routes/equipment");
+const favoriteRoutes = require("./routes/favorites");
+const { router: waitingRoutes } = require("./routes/waiting");
+const routineRoutes = require("./routes/routines");
+const notificationRoutes = require("./routes/notifications");
 
 const app = express();
-const server = http.createServer(app);
-const prisma = require('./lib/prisma');
+const server = http.createServer(app); // ✅ 기존과 동일
+const prisma = require("./lib/prisma");
 
 /** ===================== 운영 안전화 기본 셋업 ===================== */
-app.set('trust proxy', 1);
+app.set("trust proxy", 1);
 
 /** ===================== CORS 설정 ===================== */
 function parseEnvList(name) {
-  return (process.env[name] || '')
-    .split(',')
-    .map(s => s.trim())
+  return (process.env[name] || "")
+    .split(",")
+    .map((s) => s.trim())
     .filter(Boolean);
 }
 
 function parseEnvRegexList(name) {
-  const raw = (process.env[name] || '').trim();
+  const raw = (process.env[name] || "").trim();
   if (!raw) return [];
   return [new RegExp(raw)];
 }
 
-const allowlist = parseEnvList('CORS_ORIGINS');
-const regexList = parseEnvRegexList('CORS_ORIGINS_REGEX');
+const allowlist = parseEnvList("CORS_ORIGINS");
+const regexList = parseEnvRegexList("CORS_ORIGINS_REGEX");
 
 function isAllowedOrigin(origin) {
   if (!origin) return true;
   if (allowlist.includes(origin)) return true;
-  if (regexList.some(re => re.test(origin))) return true;
+  if (regexList.some((re) => re.test(origin))) return true;
   return false;
 }
 
-if (process.env.CORS_DEBUG === '1') {
+if (process.env.CORS_DEBUG === "1") {
   app.use((req, _res, next) => {
-    console.log('[CORS]', { origin: req.headers.origin, method: req.method, path: req.path });
+    console.log("[CORS]", {
+      origin: req.headers.origin,
+      method: req.method,
+      path: req.path,
+    });
     next();
   });
 }
 
-app.use(cors({
-  origin(origin, cb) {
-    if (isAllowedOrigin(origin)) return cb(null, true);
-    return cb(new Error(`Not allowed by CORS: ${origin || 'null-origin'}`));
-  },
-  credentials: true,
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization'],
-  optionsSuccessStatus: 204,
-  maxAge: 86400,
-}));
+app.use(
+  cors({
+    origin(origin, cb) {
+      if (isAllowedOrigin(origin)) return cb(null, true);
+      return cb(new Error(`Not allowed by CORS: ${origin || "null-origin"}`));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    optionsSuccessStatus: 204,
+    maxAge: 86400,
+  }),
+);
 
-app.options('*', cors());
+app.options("*", cors());
 
 /** ===================== 바디 파서 ===================== */
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: "1mb" }));
 
 /** ===================== 세션/패스포트 ===================== */
 if (!process.env.SESSION_SECRET) {
-  console.warn('[server] SESSION_SECRET is not set');
+  console.warn("[server] SESSION_SECRET is not set");
 }
 
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'dev-secret',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'none',
-  }
-}));
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "dev-secret",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "none",
+    },
+  }),
+);
 
 app.use(passport.initialize());
 app.use(passport.session());
 
 /** ===================== Health ===================== */
-app.get('/health', (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+app.get("/health", (_req, res) =>
+  res.json({ ok: true, time: new Date().toISOString() }),
+);
 
 /** ===================== 라우터 ===================== */
-app.use('/api/auth', authRoutes);
-app.use('/api/equipment', equipmentRoutes);
-app.use('/api/favorites', favoriteRoutes);
-app.use('/api/waiting', waitingRoutes);
-app.use('/api/routines', routineRoutes);
-app.use('/api/notifications', notificationRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/equipment", equipmentRoutes);
+app.use("/api/favorites", favoriteRoutes);
+app.use("/api/waiting", waitingRoutes);
+app.use("/api/routines", routineRoutes);
+app.use("/api/notifications", notificationRoutes);
 
-/** ===================== WebSocket ===================== */
-setupWebSocket(server);
+/** ===================== 🆕 Socket.IO 초기화 ===================== */
+const io = initializeSocketServer(server); // ✅ WebSocket 대신 Socket.IO 사용
+app.set("io", io); // Express에서 io 접근 가능하도록 설정 (선택사항)
 
 /** ===================== 404 & 에러 핸들러 ===================== */
 app.use((req, res, _next) => {
-  res.status(404).json({ error: 'Not Found', path: req.path });
+  res.status(404).json({ error: "Not Found", path: req.path });
 });
 
 app.use((err, req, res, _next) => {
   if (err && /CORS/i.test(err.message)) {
-    return res.status(403).json({ error: 'CORS blocked', detail: err.message });
+    return res.status(403).json({ error: "CORS blocked", detail: err.message });
   }
   const status = err.status || 500;
-  if (process.env.NODE_ENV !== 'production') {
-    console.error('[ERROR]', err);
+  if (process.env.NODE_ENV !== "production") {
+    console.error("[ERROR]", err);
   }
-  res.status(status).json({ error: err.message || 'Server Error' });
+  res.status(status).json({ error: err.message || "Server Error" });
 });
 
 /** ===================== 서버 시작 ===================== */
@@ -137,119 +145,80 @@ server.requestTimeout = 60_000;
 
 server.listen(PORT, () => {
   console.log(`🚀 서버가 http://localhost:${PORT} 에서 실행 중`);
-  console.log(`🔌 WebSocket이 ws://localhost:${PORT}/ws 에서 실행 중`);
-  console.log(`📱 실시간 알림 활성화`);
+  console.log(`🔌 Socket.IO가 실행 중 (경로: /socket.io/)`);
+  console.log(`📱 실시간 알림 활성화 (Socket.IO)`);
   console.log(`✅ 이벤트 버스 패턴 적용 완료 - 순환 참조 해결됨`);
-  
-  // 알림 자동 정리 작업 시작
-  //scheduleNotificationCleanup();
 
   // 🆕 게스트 정리 스케줄러 시작
   scheduleGuestCleanup();
 });
 
-/** ===================== 알림 자동 정리 스케줄러 ===================== */
-function scheduleNotificationCleanup() {
-  cleanupOldNotifications().catch(err => {
-    console.error('[Notification Cleanup] 초기 정리 실패:', err);
-  });
-
-  const scheduleDaily = () => {
-    const now = new Date();
-    const kstOffset = 9 * 60 * 60 * 1000;
-    const kstNow = new Date(now.getTime() + kstOffset);
-    
-    const tomorrow = new Date(kstNow);
-    tomorrow.setHours(24, 0, 0, 0);
-    const msUntilMidnight = tomorrow.getTime() - kstNow.getTime();
-
-    setTimeout(() => {
-      cleanupOldNotifications()
-        .then(count => {
-          console.log(`[Notification Cleanup] ${count}개의 오래된 알림 삭제됨`);
-        })
-        .catch(err => {
-          console.error('[Notification Cleanup] 정리 실패:', err);
-        });
-      
-      scheduleDaily();
-    }, msUntilMidnight);
-  };
-
-  scheduleDaily();
-  console.log('🧹 알림 자동 정리 스케줄러 시작 (매일 자정 KST)');
-}
-
 /** ===================== 🆕 게스트 계정 자동 정리 스케줄러 ===================== */
 async function cleanupExpiredGuests() {
   try {
     const now = new Date();
-    
-    // 만료된 게스트 찾기
+
     const expiredGuests = await prisma.user.findMany({
       where: {
         isGuest: true,
-        guestExpiresAt: {
-          lte: now
-        }
+        guestExpiresAt: { lte: now },
       },
-      select: { id: true, email: true, name: true }
+      select: { id: true, email: true, name: true },
     });
 
     if (expiredGuests.length === 0) return 0;
 
-    console.log(`[Guest Cleanup] ${expiredGuests.length}개의 만료된 게스트 계정 발견:`, 
-      expiredGuests.map(g => g.name).join(', '));
+    console.log(
+      `[Guest Cleanup] ${expiredGuests.length}개의 만료된 게스트 계정 발견:`,
+      expiredGuests.map((g) => g.name).join(", "),
+    );
 
-    // 관련 데이터 삭제 (Cascade 설정되어 있으면 자동 삭제됨)
     const deleted = await prisma.user.deleteMany({
-      where: {
-        id: {
-          in: expiredGuests.map(g => g.id)
-        }
-      }
+      where: { id: { in: expiredGuests.map((g) => g.id) } },
     });
 
     return deleted.count;
   } catch (error) {
-    console.error('[Guest Cleanup] 오류:', error);
+    console.error("[Guest Cleanup] 오류:", error);
     throw error;
   }
 }
 
 function scheduleGuestCleanup() {
-  // 시작 시 즉시 한 번 실행
-  cleanupExpiredGuests().catch(err => {
-    console.error('[Guest Cleanup] 초기 정리 실패:', err);
+  cleanupExpiredGuests().catch((err) => {
+    console.error("[Guest Cleanup] 초기 정리 실패:", err);
   });
 
-  // 30분마다 자동 정리
-  setInterval(() => {
-    cleanupExpiredGuests()
-      .then(count => {
-        if (count > 0) {
-          console.log(`[Guest Cleanup] ${count}개의 만료된 게스트 계정 삭제됨`);
-        }
-      })
-      .catch(err => {
-        console.error('[Guest Cleanup] 정리 실패:', err);
-      });
-  }, 30 * 60 * 1000);  // 30분
+  setInterval(
+    () => {
+      cleanupExpiredGuests()
+        .then((count) => {
+          if (count > 0) {
+            console.log(
+              `[Guest Cleanup] ${count}개의 만료된 게스트 계정 삭제됨`,
+            );
+          }
+        })
+        .catch((err) => {
+          console.error("[Guest Cleanup] 정리 실패:", err);
+        });
+    },
+    30 * 60 * 1000,
+  );
 
-  console.log('🧹 게스트 계정 자동 정리 스케줄러 시작 (30분마다)');
+  console.log("🧹 게스트 계정 자동 정리 스케줄러 시작 (30분마다)");
 }
-
 
 /** ===================== 그레이스풀 종료 ===================== */
 function shutdown(signal) {
   console.log(`[${signal}] shutting down...`);
   server.close(() => {
-    console.log('HTTP server closed');
+    console.log("HTTP server closed");
     prisma.$disconnect().finally(() => process.exit(0));
   });
-  
+
   setTimeout(() => process.exit(1), 10_000).unref();
 }
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
