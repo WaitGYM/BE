@@ -10,6 +10,7 @@ const {
   startAutoUpdate,
   stopAutoUpdate,
   reorderQueue,
+  reorderQueueInTransaction,
   notifyNextUser,
   autoUpdateCount,
   userUpdateLimiter,
@@ -44,6 +45,7 @@ router.post(
         userId: req.user.id,
         status: { in: ["WAITING", "NOTIFIED"] },
       },
+      orderBy: { createdAt: "desc" },
     });
 
     if (existingQueue) {
@@ -70,11 +72,11 @@ router.post(
       }
       if (myUsage.setStatus === "RESTING") {
         console.log(
-          `User ${req.user.id} queuing for equipment ${equipmentId} while resting on equipment ${myUsage.equipmentId}`
+          `User ${req.user.id} queuing for equipment ${equipmentId} while resting on equipment ${myUsage.equipmentId}`,
         );
       } else if (myUsage.setStatus === "EXERCISING") {
         console.log(
-          `User ${req.user.id} queuing for equipment ${equipmentId} while exercising on equipment ${myUsage.equipmentId}`
+          `User ${req.user.id} queuing for equipment ${equipmentId} while exercising on equipment ${myUsage.equipmentId}`,
         );
       }
     }
@@ -110,7 +112,7 @@ router.post(
       startAutoUpdate(equipmentId);
     } else {
       if (queue.queuePosition === 1) {
-      setTimeout(() => notifyNextUser(equipmentId), 300);
+        setTimeout(() => notifyNextUser(equipmentId), 300);
       }
     }
 
@@ -146,7 +148,7 @@ router.post(
     }
 
     res.status(201).json(response);
-  })
+  }),
 );
 
 // POST /api/waiting/update-eta/:equipmentId
@@ -205,7 +207,7 @@ router.post(
             setStatus: currentUsage.setStatus,
             estimatedMinutesLeft: currentETA,
             progress: Math.round(
-              (currentUsage.currentSet / currentUsage.totalSets) * 100
+              (currentUsage.currentSet / currentUsage.totalSets) * 100,
             ),
           }
         : null,
@@ -224,7 +226,7 @@ router.post(
     eventBus.emitETAUpdate(equipmentId, updateData);
 
     res.json(updateData);
-  })
+  }),
 );
 
 // POST /api/waiting/start-using/:equipmentId
@@ -312,6 +314,8 @@ router.post(
           where: { id: firstInQueue.id },
           data: { status: "COMPLETED" },
         });
+
+        await reorderQueueInTransaction(tx, equipmentId);
       }
 
       return newUsage;
@@ -342,7 +346,7 @@ router.post(
       estimatedEndAt: usage.estimatedEndAt,
       progress: Math.round((usage.currentSet / usage.totalSets) * 100),
     });
-  })
+  }),
 );
 
 // POST /api/waiting/complete-set/:equipmentId
@@ -388,7 +392,7 @@ router.post(
         completedSets: usage.currentSet,
         completedAt: completedUsage.endedAt,
         durationSeconds: Math.round(
-          (completedUsage.endedAt - usage.startedAt) / 1000
+          (completedUsage.endedAt - usage.startedAt) / 1000,
         ),
         wasFullyCompleted: true,
         completionMessage: `🎉 ${usage.user.name}님이 ${usage.equipment.name} 운동을 완료했습니다!`,
@@ -460,7 +464,7 @@ router.post(
       restSeconds: usage.restSeconds,
       summary,
     });
-  })
+  }),
 );
 
 // POST /api/waiting/skip-rest/:equipmentId
@@ -508,7 +512,7 @@ router.post(
         completedSets: usage.currentSet,
         completedAt: completedUsage.endedAt,
         durationSeconds: Math.round(
-          (completedUsage.endedAt - usage.startedAt) / 1000
+          (completedUsage.endedAt - usage.startedAt) / 1000,
         ),
         wasFullyCompleted: true,
         wasSkipped: true,
@@ -553,7 +557,7 @@ router.post(
       skippedRest: true,
       progress: Math.round((nextSet / usage.totalSets) * 100),
     });
-  })
+  }),
 );
 
 // POST /api/waiting/stop-exercise/:equipmentId
@@ -606,7 +610,7 @@ router.post(
       message: "운동 중단 완료",
       summary: stopSummary,
     });
-  })
+  }),
 );
 
 // GET /api/waiting/status/:equipmentId
@@ -660,7 +664,7 @@ router.get(
       status,
       updatedAt: new Date().toISOString(),
     });
-  })
+  }),
 );
 
 // DELETE /api/waiting/queue/:queueId
@@ -792,7 +796,7 @@ router.delete(
         message: "서버 오류입니다. 잠시 후 다시 시도해주세요",
       });
     }
-  })
+  }),
 );
 
 // GET /api/waiting/my-queues - 내 모든 대기열 조회
@@ -848,7 +852,7 @@ router.get(
         expired: myQueues.filter((q) => q.status === "EXPIRED").length,
       },
     });
-  })
+  }),
 );
 
 // GET /api/waiting/admin/stats
@@ -871,7 +875,7 @@ router.get(
       timestamp: new Date(),
       rateLimitPolicy: RATE_LIMIT,
     });
-  })
+  }),
 );
 
 // ==========================================
@@ -923,7 +927,7 @@ router.post(
         completedSets: usage.currentSet,
         completedAt: completedUsage.endedAt,
         durationSeconds: Math.round(
-          (completedUsage.endedAt - usage.startedAt) / 1000
+          (completedUsage.endedAt - usage.startedAt) / 1000,
         ),
         wasFullyCompleted: true,
         completionMessage: `🎉 ${usage.user.name}님이 ${usage.equipment.name} 운동을 완료했습니다!`,
@@ -995,7 +999,7 @@ router.post(
       equipmentName: usage.equipment.name,
       summary,
     });
-  })
+  }),
 );
 
 // POST /api/waiting/skip-rest
@@ -1044,7 +1048,7 @@ router.post(
         completedSets: usage.currentSet,
         completedAt: completedUsage.endedAt,
         durationSeconds: Math.round(
-          (completedUsage.endedAt - usage.startedAt) / 1000
+          (completedUsage.endedAt - usage.startedAt) / 1000,
         ),
         wasFullyCompleted: true,
         wasSkipped: true,
@@ -1090,7 +1094,7 @@ router.post(
       skippedRest: true,
       progress: Math.round((nextSet / usage.totalSets) * 100),
     });
-  })
+  }),
 );
 
 // POST /api/waiting/stop-exercise
@@ -1144,7 +1148,7 @@ router.post(
       equipmentName: usage.equipment.name,
       summary: stopSummary,
     });
-  })
+  }),
 );
 
 // GET /api/waiting/current-usage
@@ -1165,7 +1169,7 @@ router.get(
       const restElapsed = Date.now() - usage.restStartedAt.getTime();
       restTimeLeft = Math.max(
         0,
-        Math.ceil((usage.restSeconds * 1000 - restElapsed) / 1000)
+        Math.ceil((usage.restSeconds * 1000 - restElapsed) / 1000),
       );
     }
 
@@ -1176,8 +1180,8 @@ router.get(
             Math.round(
               ((Date.now() - usage.currentSetStartedAt.getTime()) /
                 (3 * 60 * 1000)) *
-                100
-            )
+                100,
+            ),
           )
         : 0;
 
@@ -1198,7 +1202,7 @@ router.get(
       startedAt: usage.startedAt,
       estimatedEndAt: usage.estimatedEndAt,
     });
-  })
+  }),
 );
 
 module.exports = { router };

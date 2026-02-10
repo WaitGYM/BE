@@ -79,7 +79,7 @@ function computeStopSummary(usage, now = new Date()) {
   if (usage.setStatus === "EXERCISING" && usage.currentSetStartedAt) {
     inFlightWorkSec = Math.max(
       0,
-      Math.floor((now - new Date(usage.currentSetStartedAt)) / 1000)
+      Math.floor((now - new Date(usage.currentSetStartedAt)) / 1000),
     );
   }
 
@@ -134,7 +134,7 @@ async function startAutoUpdate(equipmentId) {
             setStatus: currentUsage.setStatus,
             estimatedMinutesLeft: currentETA,
             progress: Math.round(
-              (currentUsage.currentSet / currentUsage.totalSets) * 100
+              (currentUsage.currentSet / currentUsage.totalSets) * 100,
             ),
           },
           waitingQueue: queue.map((q, i) => ({
@@ -153,7 +153,7 @@ async function startAutoUpdate(equipmentId) {
         stopAutoUpdate(equipmentId);
       }
     },
-    2 * 60 * 1000
+    2 * 60 * 1000,
   );
 
   autoUpdateIntervals.set(equipmentId, id);
@@ -177,6 +177,23 @@ async function reorderQueue(equipmentId) {
   for (let i = 0; i < rows.length; i++) {
     if (rows[i].queuePosition !== i + 1) {
       await prisma.waitingQueue.update({
+        where: { id: rows[i].id },
+        data: { queuePosition: i + 1 },
+      });
+    }
+  }
+  return rows.length;
+}
+
+async function reorderQueueInTransaction(tx, equipmentId) {
+  const rows = await tx.waitingQueue.findMany({
+    where: { equipmentId, status: { in: ["WAITING", "NOTIFIED"] } },
+    orderBy: { createdAt: "asc" },
+  });
+
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].queuePosition !== i + 1) {
+      await tx.waitingQueue.update({
         where: { id: rows[i].id },
         data: { queuePosition: i + 1 },
       });
@@ -250,7 +267,7 @@ async function notifyNextUser(equipmentId) {
         await notifyNextUser(equipmentId);
       }
     },
-    5 * 60 * 1000
+    5 * 60 * 1000,
   );
 
   return true;
@@ -358,6 +375,7 @@ module.exports = {
   startAutoUpdate,
   stopAutoUpdate,
   reorderQueue,
+  reorderQueueInTransaction,
   notifyNextUser,
   autoUpdateCount: () => autoUpdateIntervals.size,
   userUpdateLimiter,

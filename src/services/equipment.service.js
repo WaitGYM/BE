@@ -35,9 +35,21 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
           equipmentId: { in: equipmentIds },
           status: { in: ["WAITING", "NOTIFIED"] },
         },
+        orderBy: {
+          createdAt: "desc",
+        },
       }),
       prisma.equipmentUsage.findFirst({ where: { userId, status: "IN_USE" } }),
     ]);
+
+    const latestQueues = new Map();
+    myQueues.forEach((q) => {
+      const existing = latestQueues.get(q.equipmentId);
+      if (!existing || q.createdAt > existing.createdAt) {
+        latestQueues.set(q.equipmentId, q);
+      }
+    });
+    myQueues = Array.from(latestQueues.values());
 
     const { rangeTodayKST } = require("../utils/time");
     const { start, end } = rangeTodayKST();
@@ -180,7 +192,7 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
     } else if (recentCompletion) {
       equipmentStatus = "recently_completed";
       const minutesAgo = Math.round(
-        (Date.now() - recentCompletion.completedAt.getTime()) / 60000
+        (Date.now() - recentCompletion.completedAt.getTime()) / 60000,
       );
       if (recentCompletion.isMe) {
         statusMessage = `방금 완료 (${minutesAgo}분 전)`;
@@ -252,7 +264,7 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
             isMe: recentCompletion.isMe,
             completedAt: recentCompletion.completedAt,
             minutesAgo: Math.round(
-              (Date.now() - recentCompletion.completedAt.getTime()) / 60000
+              (Date.now() - recentCompletion.completedAt.getTime()) / 60000,
             ),
             totalSets: recentCompletion.totalSets,
             completedSets: recentCompletion.completedSets,
@@ -264,7 +276,7 @@ async function getEquipmentStatusInfo(equipmentIds, userId = null) {
                 ? Math.round(
                     (recentCompletion.completedSets /
                       recentCompletion.totalSets) *
-                      100
+                      100,
                   )
                 : 0,
           }
