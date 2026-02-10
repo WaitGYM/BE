@@ -1,26 +1,26 @@
 // src/services/notification.service.js
-const prisma = require('../lib/prisma');
-const eventBus = require('../events/eventBus');
+const prisma = require("../lib/prisma");
+const eventBus = require("../events/eventBus");
 
 /**
  * 알림 타입별 카테고리 매핑 (3가지만)
  */
 const NOTIFICATION_CATEGORIES = {
   // 사용 가능 알림
-  EQUIPMENT_AVAILABLE: 'queue',
-  
+  EQUIPMENT_AVAILABLE: "queue",
+
   // 대기 만료 알림
-  QUEUE_EXPIRED: 'queue',
-  
+  QUEUE_EXPIRED: "queue",
+
   // 대기자 수 알림
-  WAITING_COUNT: 'eta',
+  WAITING_COUNT: "eta",
 };
 
 /**
  * 알림 우선순위 (높을수록 중요)
  */
 const NOTIFICATION_PRIORITY = {
-  EQUIPMENT_AVAILABLE: 10,      // 가장 중요
+  EQUIPMENT_AVAILABLE: 10, // 가장 중요
   QUEUE_EXPIRED: 8,
   WAITING_COUNT: 4,
 };
@@ -32,7 +32,9 @@ async function saveNotification(userId, payload) {
   try {
     // 허용된 타입이 아니면 저장하지 않음
     if (!NOTIFICATION_CATEGORIES[payload.type]) {
-      console.log(`[Notification] Skipped saving non-allowed type: ${payload.type}`);
+      console.log(
+        `[Notification] Skipped saving non-allowed type: ${payload.type}`,
+      );
       return null;
     }
 
@@ -40,14 +42,22 @@ async function saveNotification(userId, payload) {
     const priority = NOTIFICATION_PRIORITY[payload.type] || 5;
 
     // 메타데이터 정리
-    const { type, title, message, equipmentId, equipmentName, queueId, ...metadata } = payload;
+    const {
+      type,
+      title,
+      message,
+      equipmentId,
+      equipmentName,
+      queueId,
+      ...metadata
+    } = payload;
 
     const notification = await prisma.notification.create({
       data: {
         userId,
         type: payload.type,
-        title: payload.title || '알림',
-        message: payload.message || '',
+        title: payload.title || "알림",
+        message: payload.message || "",
         equipmentId: payload.equipmentId || null,
         equipmentName: payload.equipmentName || null,
         queueId: payload.queueId || null,
@@ -60,7 +70,7 @@ async function saveNotification(userId, payload) {
 
     return notification;
   } catch (error) {
-    console.error('알림 저장 실패:', error);
+    console.error("알림 저장 실패:", error);
     return null;
   }
 }
@@ -105,8 +115,8 @@ async function getNotifications(userId, options = {}) {
     prisma.notification.findMany({
       where,
       orderBy: [
-        { isRead: 'asc' },        // 안읽은 것 먼저
-        { createdAt: 'desc' },    // 최신순
+        { isRead: "asc" }, // 안읽은 것 먼저
+        { createdAt: "desc" }, // 최신순
       ],
       take: limit,
       skip: offset,
@@ -132,7 +142,9 @@ async function getNotifications(userId, options = {}) {
  * 알림 읽음 처리
  */
 async function markAsRead(userId, notificationIds) {
-  const ids = Array.isArray(notificationIds) ? notificationIds : [notificationIds];
+  const ids = Array.isArray(notificationIds)
+    ? notificationIds
+    : [notificationIds];
 
   const result = await prisma.notification.updateMany({
     where: {
@@ -174,9 +186,8 @@ async function markAllAsRead(userId, options = {}) {
  */
 async function cleanupOldNotifications() {
   // TODO: 나중에 Prisma 로직 안정화되면 다시 구현
-  console.log('[Notification Cleanup] 비활성화 상태 - 아무 작업도 하지 않음');
+  console.log("[Notification Cleanup] 비활성화 상태 - 아무 작업도 하지 않음");
   return 0;
-  
 }
 
 /**
@@ -187,7 +198,7 @@ async function getNotificationStats(userId) {
     prisma.notification.count({ where: { userId } }),
     prisma.notification.count({ where: { userId, isRead: false } }),
     prisma.notification.groupBy({
-      by: ['category'],
+      by: ["category"],
       where: { userId },
       _count: { id: true },
     }),
@@ -196,7 +207,7 @@ async function getNotificationStats(userId) {
   return {
     totalCount,
     unreadCount,
-    categories: categoryStats.map(stat => ({
+    categories: categoryStats.map((stat) => ({
       category: stat.category,
       count: stat._count.id,
     })),
@@ -211,18 +222,18 @@ async function sendAndSaveNotification(userId, payload) {
   // 1. 허용된 타입만 DB에 저장
   if (NOTIFICATION_CATEGORIES[payload.type]) {
     await saveNotification(userId, payload);
+    eventBus.emitNotification(userId, payload);
   }
-  
+
   // 2. 모든 타입의 알림은 WebSocket으로 전송 (이벤트 발행)
-  eventBus.emitNotification(userId, payload);
-  
+
   return true;
 }
 
 async function getUnreadNotificationCount(userId) {
   try {
     if (!userId) {
-      console.error('[getUnreadNotificationCount] userId가 없습니다');
+      console.error("[getUnreadNotificationCount] userId가 없습니다");
       return 0; // 에러 대신 0 반환
     }
 
@@ -237,11 +248,12 @@ async function getUnreadNotificationCount(userId) {
       },
     });
 
-    console.log(`[getUnreadNotificationCount] userId=${userId}, count=${count}`);
+    console.log(
+      `[getUnreadNotificationCount] userId=${userId}, count=${count}`,
+    );
     return count || 0; // null/undefined 방어
-    
   } catch (error) {
-    console.error('[getUnreadNotificationCount] 에러:', error);
+    console.error("[getUnreadNotificationCount] 에러:", error);
     return 0; // 에러 시 0 반환 (서비스 중단 방지)
   }
 }

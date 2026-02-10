@@ -14,7 +14,6 @@ module.exports = async (socket, next) => {
 
     // 2. JWT 검증
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log("decoded : ", decoded);
 
     if (!decoded.id) {
       console.error("❌ [Auth] Invalid token: missing userId");

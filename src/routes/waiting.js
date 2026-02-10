@@ -109,7 +109,9 @@ router.post(
       estimatedWaitMinutes = etas[idx] ?? 0;
       startAutoUpdate(equipmentId);
     } else {
+      if (queue.queuePosition === 1) {
       setTimeout(() => notifyNextUser(equipmentId), 300);
+      }
     }
 
     // WebSocket 이벤트만 발행

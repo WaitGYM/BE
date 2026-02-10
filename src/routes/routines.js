@@ -1922,6 +1922,12 @@ router.post(
       const etas = buildQueueETAs(currentETA, queueList);
       const idx = queueList.findIndex((q) => q.id === queue.id);
       estimatedWaitMinutes = etas[idx] ?? 0;
+    } else {
+      // 🔥 추가: 기구가 비어있을 때 ETA는 대기 순서 기반으로 계산
+      // 1번: 즉시 가능 (0분)
+      // 2번 이상: 앞사람들의 예상 시간 누적
+      const { TYPICAL_BLOCK_MIN } = require("../utils/eta");
+      estimatedWaitMinutes = (queue.queuePosition - 1) * TYPICAL_BLOCK_MIN;
     }
 
     // 8. 이벤트 발행

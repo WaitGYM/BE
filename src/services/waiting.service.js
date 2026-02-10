@@ -241,7 +241,7 @@ async function notifyNextUser(equipmentId) {
         await sendAndSaveNotification(next.userId, {
           type: "QUEUE_EXPIRED",
           title: "대기 만료",
-          message: "시간 초과로 대기에서 제외되었습니다",
+          message: `시간 초과로 ${next.equipment.name} 대기에서 제외되었습니다`,
           equipmentId,
           equipmentName: next.equipment.name,
         });
