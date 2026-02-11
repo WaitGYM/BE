@@ -47,11 +47,17 @@ function calculateRealTimeETA(usage) {
 // queue: 대기열 배열(선두가 0번)
 function buildQueueETAs(currentETA, queue) {
   const etas = [];
-  let acc = currentETA || 0;
+
   for (let i = 0; i < (queue?.length ?? 0); i++) {
-    etas.push(acc);
-    // 경험치 기반 추정: 3세트 * AVG_SET_MIN + 휴식(대략 2분) + 교체시간
-    acc += AVG_SET_MIN * 3 + 2 + SETUP_CLEANUP_MIN;
+    if (i === 0) {
+      // 1번 대기자: 현재 사용자 끝날 때까지만 기다림
+      etas.push(currentETA || 0);
+    } else {
+      // 2번 이상: 이전 대기자 시작 + 운동시간 + 교체시간
+      const prevStartTime = etas[i - 1];
+      const waitTime = prevStartTime + AVG_SET_MIN * 3 + 2 + SETUP_CLEANUP_MIN;
+      etas.push(waitTime);
+    }
   }
   return etas;
 }
